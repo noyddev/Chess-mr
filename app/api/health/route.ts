@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { databaseHealthCheck } from "@/lib/database";
+import { performHealthCheck } from "@/lib/database";
 
 export async function GET() {
-  const health = await databaseHealthCheck();
+  const health = await performHealthCheck();
   
-  return NextResponse.json(health, {
-    status: health.status === "healthy" ? 200 : 503,
-  });
+  const statusCode = health.systemStatus === "ok" ? 200 : 
+                     health.systemStatus === "degraded" ? 200 : 503;
+  
+  return NextResponse.json(health, { status: statusCode });
 }

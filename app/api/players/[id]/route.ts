@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { withRetry } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { PlayerProfile } from "@/lib/api/types";
 
 export async function GET(
@@ -54,7 +55,7 @@ export async function GET(
 
     if (!player) {
       return NextResponse.json(
-        { error: "اللاعب غير موجود", data: null },
+        errorResponse("اللاعب غير موجود", null),
         { status: 404 }
       );
     }
@@ -85,12 +86,12 @@ export async function GET(
       stats,
     };
 
-    return NextResponse.json({ data: response });
+    return NextResponse.json(successResponse(response));
   } catch (error) {
     console.error("Player fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب بيانات اللاعب", data: null },
-      { status: 500 }
+      errorResponse("فشل في الاتصال بقاعدة البيانات", null),
+      { status: 503 }
     );
   }
 }

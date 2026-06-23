@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { withRetry } from "@/lib/database";
+import { withRetry, getLastSyncTime } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { TournamentListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
         orderBy.startDate = "desc";
     }
 
-    const [tournaments, total] = await withRetry(async () =>
+    const [tournaments, total, lastSync] = await withRetry(async () =>
       Promise.all([
         prisma.tournament.findMany({
           where,
@@ -49,6 +50,7 @@ export async function GET(request: Request) {
           },
         }),
         prisma.tournament.count({ where }),
+        getLastSyncTime(),
       ])
     );
 
@@ -62,12 +64,14 @@ export async function GET(request: Request) {
       },
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(
+      successResponse(response, lastSync)
+    );
   } catch (error) {
     console.error("Tournaments fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب البطولات", data: [], pagination: null },
-      { status: 500 }
+      errorResponse("فشل في الاتصال بقاعدة البيانات", null),
+      { status: 503 }
     );
   }
 }

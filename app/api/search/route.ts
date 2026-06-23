@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { withRetry } from "@/lib/database";
+import { withRetry, getLastSyncTime } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { LiveSearchResult } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -9,10 +10,12 @@ export async function GET(request: Request) {
     const query = searchParams.get("q");
 
     if (!query || query.length < 2) {
-      return NextResponse.json({ results: [] });
+      return NextResponse.json(
+        successResponse({ results: [] })
+      );
     }
 
-    const [players, tournaments] = await withRetry(async () =>
+    const [players, tournaments, lastSync] = await withRetry(async () =>
       Promise.all([
         prisma.player.findMany({
           where: {
@@ -48,6 +51,7 @@ export async function GET(request: Request) {
             location: true,
           },
         }),
+        getLastSyncTime(),
       ])
     );
 
@@ -69,12 +73,14 @@ export async function GET(request: Request) {
       })),
     ];
 
-    return NextResponse.json({ results });
+    return NextResponse.json(
+      successResponse({ results })
+    );
   } catch (error) {
     console.error("Search error:", error);
     return NextResponse.json(
-      { error: "فشل في البحث", results: [] },
-      { status: 500 }
+      errorResponse("فشل في البحث", { results: [] }),
+      { status: 503 }
     );
   }
 }

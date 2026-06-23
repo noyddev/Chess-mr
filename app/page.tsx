@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SystemStatusBanner, DataEmptyState } from "@/components/features/system-status-banner";
 
 export const dynamic = "force-dynamic";
 import {
@@ -18,7 +19,53 @@ import {
 } from "lucide-react";
 import { formatDateShort, getInitials, getDisplayRating } from "@/lib/utils";
 
-async function getHomePageData() {
+interface HomePageData {
+  activeTournaments: Array<{
+    id: string;
+    name: string;
+    location: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    playerCount: number;
+  }>;
+  upcomingTournaments: Array<{
+    id: string;
+    name: string;
+    location: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    playerCount: number;
+  }>;
+  recentTournaments: Array<{
+    id: string;
+    name: string;
+    location: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    playerCount: number;
+  }>;
+  topPlayers: Array<{
+    id: string;
+    name: string;
+    federation: string;
+    lichessTitle: string | null;
+    fideTitle: string | null;
+    fideRating: number | null;
+    lichessRapid: number | null;
+    lichessBlitz: number | null;
+    lichessClassical: number | null;
+  }>;
+  totalTournaments: number;
+  totalPlayers: number;
+  lastSync: Date | null;
+  systemStatus: "ok" | "degraded" | "error";
+  databaseConnected: boolean;
+}
+
+async function getHomePageData(): Promise<HomePageData> {
   try {
     const [
       activeTournaments,
@@ -100,10 +147,12 @@ async function getHomePageData() {
       upcomingTournaments,
       recentTournaments,
       topPlayers,
-    totalTournaments: stats[0],
-    totalPlayers: stats[1],
-    lastSync: stats[2]?.completedAt,
-  };
+      totalTournaments: stats[0],
+      totalPlayers: stats[1],
+      lastSync: stats[2]?.completedAt ?? null,
+      systemStatus: "ok",
+      databaseConnected: true,
+    };
   } catch (error) {
     console.error("Failed to fetch home page data:", error);
     return {
@@ -114,6 +163,8 @@ async function getHomePageData() {
       totalTournaments: 0,
       totalPlayers: 0,
       lastSync: null,
+      systemStatus: "error",
+      databaseConnected: false,
     };
   }
 }
@@ -274,6 +325,13 @@ export default async function HomePage() {
             </div>
           </div>
         </div>
+        
+        {/* System Status Banner */}
+        <SystemStatusBanner
+          status={data.systemStatus}
+          lastSync={data.lastSync}
+          databaseConnected={data.databaseConnected}
+        />
 
         {/* Decorative chess pattern */}
         <div className="absolute inset-0 -z-10 opacity-5">

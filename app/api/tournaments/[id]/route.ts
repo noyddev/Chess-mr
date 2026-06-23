@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { withRetry } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { TournamentDetails } from "@/lib/api/types";
 
 export async function GET(
@@ -92,17 +93,19 @@ export async function GET(
 
     if (!tournament) {
       return NextResponse.json(
-        { error: "البطولة غير موجودة", data: null },
+        errorResponse("البطولة غير موجودة", null),
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ data: tournament });
+    return NextResponse.json(
+      successResponse(tournament, tournament.lastSynced)
+    );
   } catch (error) {
     console.error("Tournament fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب تفاصيل البطولة", data: null },
-      { status: 500 }
+      errorResponse("فشل في الاتصال بقاعدة البيانات", null),
+      { status: 503 }
     );
   }
 }

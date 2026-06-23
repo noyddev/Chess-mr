@@ -3,10 +3,14 @@
  */
 
 import { prisma } from "./db";
+import type { HealthResponse } from "./api/response";
 
 // Maximum retries for transient failures
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 100;
+
+// Stale threshold: 30 minutes without sync
+const STALE_THRESHOLD_MS = 30 * 60 * 1000;
 
 /**
  * Sleep utility for retry delays
@@ -41,9 +45,9 @@ export async function withRetry<T>(
           error.message.includes("timeout") ||
           error.message.includes("ECONNREFUSED") ||
           error.message.includes("ETIMEDOUT") ||
-          error.message.includes("P1001") || // Neon: computation pool not found
-          error.message.includes("P1003") || // Neon: prepared statement not found
-          error.message.includes("P2024") // Neon: connection pool timeout
+          error.message.includes("P1001") ||
+          error.message.includes("P1003") ||
+          error.message.includes("P2024")
         );
       
       if (!isRetryable) {
@@ -71,6 +75,72 @@ export async function checkDatabaseConnection(): Promise<boolean> {
 }
 
 /**
+ * Get last successful sync timestamp
+ */
+export async function getLastSyncTime(): Promise<Date | null> {
+  try {
+    const lastSync = await prisma.syncLog.findFirst({
+      where: { status: "success" },
+      orderBy: { completedAt: "desc" },
+      select: { completedAt: true },
+    });
+    return lastSync?.completedAt ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Comprehensive health check
+ */
+export async function performHealthCheck(): Promise<HealthResponse> {
+  const timestamp = new Date();
+  
+  // Check database connection
+  const [dbConnected, lastSync] = await Promise.all([
+    checkDatabaseConnection().catch(() => false),
+    getLastSyncTime().catch(() => null),
+  ]);
+  
+  // Determine sync status
+  let syncStatus: "healthy" | "stale" | "failed" = "failed";
+  if (dbConnected) {
+    if (lastSync) {
+      const timeSinceSync = timestamp.getTime() - lastSync.getTime();
+      if (timeSinceSync < STALE_THRESHOLD_MS) {
+        syncStatus = "healthy";
+      } else {
+        syncStatus = "stale";
+      }
+    } else {
+      syncStatus = "stale"; // No sync records
+    }
+  } else {
+    syncStatus = "failed";
+  }
+  
+  // Determine overall system status
+  let systemStatus: "ok" | "degraded" | "error" = "ok";
+  if (!dbConnected) {
+    systemStatus = "error";
+  } else if (syncStatus === "stale" || syncStatus === "failed") {
+    systemStatus = "degraded";
+  }
+  
+  return {
+    database: dbConnected ? "up" : "down",
+    sync: syncStatus,
+    lastSync: lastSync?.toISOString() ?? null,
+    systemStatus,
+    timestamp: timestamp.toISOString(),
+    checks: {
+      prisma: dbConnected,
+      neon: dbConnected,
+    },
+  };
+}
+
+/**
  * Safe database query wrapper that never throws
  * Returns null on any database failure
  */
@@ -86,7 +156,34 @@ export async function safeQuery<T>(
 }
 
 /**
- * Health check for API routes
+ * Verify data was actually written after sync
+ */
+export async function verifySyncIntegrity(
+  expectedTournaments: number,
+  expectedPlayers: number
+): Promise<{ valid: boolean; actualTournaments: number; actualPlayers: number }> {
+  try {
+    const [actualTournaments, actualPlayers] = await Promise.all([
+      prisma.tournament.count(),
+      prisma.player.count(),
+    ]);
+    
+    return {
+      valid: actualTournaments >= expectedTournaments && actualPlayers >= expectedPlayers,
+      actualTournaments,
+      actualPlayers,
+    };
+  } catch {
+    return {
+      valid: false,
+      actualTournaments: 0,
+      actualPlayers: 0,
+    };
+  }
+}
+
+/**
+ * Health check for API routes (legacy)
  */
 export async function databaseHealthCheck() {
   const isConnected = await checkDatabaseConnection();

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { withRetry } from "@/lib/database";
+import { withRetry, getLastSyncTime } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { PlayerListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
         orderBy.push({ name: "asc" });
     }
 
-    const [players, total] = await withRetry(async () =>
+    const [players, total, lastSync] = await withRetry(async () =>
       Promise.all([
         prisma.player.findMany({
           where,
@@ -54,6 +55,7 @@ export async function GET(request: Request) {
           },
         }),
         prisma.player.count({ where }),
+        getLastSyncTime(),
       ])
     );
 
@@ -67,12 +69,12 @@ export async function GET(request: Request) {
       },
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(successResponse(response, lastSync));
   } catch (error) {
     console.error("Players fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب قائمة اللاعبين", data: [], pagination: null },
-      { status: 500 }
+      errorResponse("فشل في الاتصال بقاعدة البيانات", null),
+      { status: 503 }
     );
   }
 }
