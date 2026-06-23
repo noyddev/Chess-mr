@@ -1,0 +1,25 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npx prisma generate && npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "regions": ["fra1"],
+  "functions": {
+    "app/api/**/*.ts": {
+      "maxDuration": 30
+    },
+    "app/api/sync/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/sync?source=tournaments",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/sync?source=players",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}
