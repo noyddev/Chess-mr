@@ -2,9 +2,22 @@ import type { LichessUser, LichessUserStatus } from "./types";
 
 const LICHESS_API_BASE = "https://lichess.org/api";
 
-const RATE_LIMIT_DELAY = 1100; // 1 request per second
+// Rate limits: with token = 60/min, without token = 20/min
+const RATE_LIMIT_DELAY = process.env.LICHESS_TOKEN ? 1000 : 3000; 
 
 let lastRequestTime = 0;
+
+function getHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  
+  if (process.env.LICHESS_TOKEN) {
+    headers["Authorization"] = `Bearer ${process.env.LICHESS_TOKEN}`;
+  }
+  
+  return headers;
+}
 
 async function rateLimitedFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const now = Date.now();
@@ -21,7 +34,7 @@ async function rateLimitedFetch(url: string, options: RequestInit = {}): Promise
   const response = await fetch(url, {
     ...options,
     headers: {
-      Accept: "application/json",
+      ...getHeaders(),
       ...options.headers,
     },
   });
@@ -30,6 +43,13 @@ async function rateLimitedFetch(url: string, options: RequestInit = {}): Promise
 }
 
 export class LichessClient {
+  private hasToken: boolean;
+
+  constructor() {
+    this.hasToken = !!process.env.LICHESS_TOKEN;
+    console.log(`Lichess client initialized (token: ${this.hasToken ? "yes" : "no"})`);
+  }
+
   /**
    * Get user public data by username
    * GET /api/user/{username}
@@ -46,6 +66,7 @@ export class LichessClient {
 
       if (response.status === 429) {
         // Rate limited, wait and retry
+        console.warn("Lichess rate limited, waiting 60s...");
         await new Promise((resolve) => setTimeout(resolve, 60000));
         return this.getUser(username);
       }
@@ -88,26 +109,40 @@ export class LichessClient {
   /**
    * Get users by IDs (usernames)
    * POST /api/users
+   * 
+   * With token: 60 requests/min, 30 users/batch
+   * Without token: 20 requests/min, 10 users/batch
    */
   async getUsers(usernames: string[]): Promise<LichessUser[]> {
     try {
-      const response = await rateLimitedFetch(`${LICHESS_API_BASE}/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain",
-          Accept: "application/x-ndjson",
-        },
-        body: usernames.join("\n"),
-      });
+      // With token we can batch 30 users, without token only 10
+      const batchSize = this.hasToken ? 30 : 10;
+      const results: LichessUser[] = [];
 
-      if (!response.ok) {
-        throw new Error(`Lichess API error: ${response.status}`);
+      for (let i = 0; i < usernames.length; i += batchSize) {
+        const batch = usernames.slice(i, i + batchSize);
+        
+        const response = await rateLimitedFetch(`${LICHESS_API_BASE}/users`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain",
+            Accept: "application/x-ndjson",
+            ...(this.hasToken ? { Authorization: `Bearer ${process.env.LICHESS_TOKEN}` } : {}),
+          },
+          body: batch.join("\n"),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Lichess API error: ${response.status}`);
+        }
+
+        const text = await response.text();
+        const lines = text.trim().split("\n");
+        
+        results.push(...lines.map((line) => JSON.parse(line)).filter(Boolean));
       }
-
-      const text = await response.text();
-      const lines = text.trim().split("\n");
       
-      return lines.map((line) => JSON.parse(line)).filter(Boolean);
+      return results;
     } catch (error) {
       console.error("Failed to fetch users:", error);
       return [];
