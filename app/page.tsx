@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SystemStatusBanner, DataEmptyState } from "@/components/features/system-status-banner";
 
 export const dynamic = "force-dynamic";
 import {
@@ -18,91 +19,154 @@ import {
 } from "lucide-react";
 import { formatDateShort, getInitials, getDisplayRating } from "@/lib/utils";
 
-async function getHomePageData() {
-  const [
-    activeTournaments,
-    upcomingTournaments,
-    recentTournaments,
-    topPlayers,
-    stats,
-  ] = await Promise.all([
-    prisma.tournament.findMany({
-      where: { status: "ACTIVE" },
-      orderBy: { startDate: "desc" },
-      take: 6,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-      },
-    }),
-    prisma.tournament.findMany({
-      where: { status: "UPCOMING" },
-      orderBy: { startDate: "asc" },
-      take: 3,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-      },
-    }),
-    prisma.tournament.findMany({
-      where: { status: "FINISHED" },
-      orderBy: { endDate: "desc" },
-      take: 5,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-      },
-    }),
-    prisma.player.findMany({
-      orderBy: { fideRating: "desc" },
-      take: 10,
-      select: {
-        id: true,
-        name: true,
-        federation: true,
-        lichessTitle: true,
-        fideTitle: true,
-        fideRating: true,
-        lichessRapid: true,
-        lichessBlitz: true,
-        lichessClassical: true,
-      },
-    }),
-    Promise.all([
-      prisma.tournament.count(),
-      prisma.player.count(),
-      prisma.syncLog.findFirst({
-        where: { source: "chess-results", status: "success" },
-        orderBy: { completedAt: "desc" },
-        select: { completedAt: true },
-      }),
-    ]),
-  ]);
+interface HomePageData {
+  activeTournaments: Array<{
+    id: string;
+    name: string;
+    location: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    playerCount: number;
+  }>;
+  upcomingTournaments: Array<{
+    id: string;
+    name: string;
+    location: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    playerCount: number;
+  }>;
+  recentTournaments: Array<{
+    id: string;
+    name: string;
+    location: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    playerCount: number;
+  }>;
+  topPlayers: Array<{
+    id: string;
+    name: string;
+    federation: string;
+    lichessTitle: string | null;
+    fideTitle: string | null;
+    fideRating: number | null;
+    lichessRapid: number | null;
+    lichessBlitz: number | null;
+    lichessClassical: number | null;
+  }>;
+  totalTournaments: number;
+  totalPlayers: number;
+  lastSync: Date | null;
+  systemStatus: "ok" | "degraded" | "error";
+  databaseConnected: boolean;
+}
 
-  return {
-    activeTournaments,
-    upcomingTournaments,
-    recentTournaments,
-    topPlayers,
-    totalTournaments: stats[0],
-    totalPlayers: stats[1],
-    lastSync: stats[2]?.completedAt,
-  };
+async function getHomePageData(): Promise<HomePageData> {
+  try {
+    const [
+      activeTournaments,
+      upcomingTournaments,
+      recentTournaments,
+      topPlayers,
+      stats,
+    ] = await Promise.all([
+      prisma.tournament.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { startDate: "desc" },
+        take: 6,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+        },
+      }),
+      prisma.tournament.findMany({
+        where: { status: "UPCOMING" },
+        orderBy: { startDate: "asc" },
+        take: 3,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+        },
+      }),
+      prisma.tournament.findMany({
+        where: { status: "FINISHED" },
+        orderBy: { endDate: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+        },
+      }),
+      prisma.player.findMany({
+        orderBy: { fideRating: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          name: true,
+          federation: true,
+          lichessTitle: true,
+          fideTitle: true,
+          fideRating: true,
+          lichessRapid: true,
+          lichessBlitz: true,
+          lichessClassical: true,
+        },
+      }),
+      Promise.all([
+        prisma.tournament.count(),
+        prisma.player.count(),
+        prisma.syncLog.findFirst({
+          where: { source: "chess-results", status: "success" },
+          orderBy: { completedAt: "desc" },
+          select: { completedAt: true },
+        }),
+      ]),
+    ]);
+
+    return {
+      activeTournaments,
+      upcomingTournaments,
+      recentTournaments,
+      topPlayers,
+      totalTournaments: stats[0],
+      totalPlayers: stats[1],
+      lastSync: stats[2]?.completedAt ?? null,
+      systemStatus: "ok",
+      databaseConnected: true,
+    };
+  } catch (error) {
+    console.error("Failed to fetch home page data:", error);
+    return {
+      activeTournaments: [],
+      upcomingTournaments: [],
+      recentTournaments: [],
+      topPlayers: [],
+      totalTournaments: 0,
+      totalPlayers: 0,
+      lastSync: null,
+      systemStatus: "error",
+      databaseConnected: false,
+    };
+  }
 }
 
 function TournamentCard({
@@ -261,6 +325,13 @@ export default async function HomePage() {
             </div>
           </div>
         </div>
+        
+        {/* System Status Banner */}
+        <SystemStatusBanner
+          status={data.systemStatus}
+          lastSync={data.lastSync}
+          databaseConnected={data.databaseConnected}
+        />
 
         {/* Decorative chess pattern */}
         <div className="absolute inset-0 -z-10 opacity-5">

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { withRetry } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { PlayerProfile } from "@/lib/api/types";
 
 export async function GET(
@@ -9,49 +11,51 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const player = await prisma.player.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        name: true,
-        federation: true,
-        lichessUsername: true,
-        lichessTitle: true,
-        fideId: true,
-        fideTitle: true,
-        fideRating: true,
-        lichessRapid: true,
-        lichessBlitz: true,
-        lichessClassical: true,
-        lichessLastSeen: true,
-        tournaments: {
-          orderBy: {
-            tournament: {
-              startDate: "desc",
+    const player = await withRetry(() =>
+      prisma.player.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          federation: true,
+          lichessUsername: true,
+          lichessTitle: true,
+          fideId: true,
+          fideTitle: true,
+          fideRating: true,
+          lichessRapid: true,
+          lichessBlitz: true,
+          lichessClassical: true,
+          lichessLastSeen: true,
+          tournaments: {
+            orderBy: {
+              tournament: {
+                startDate: "desc",
+              },
             },
-          },
-          take: 10,
-          select: {
-            points: true,
-            rank: true,
-            tournament: {
-              select: {
-                id: true,
-                name: true,
-                location: true,
-                startDate: true,
-                endDate: true,
-                status: true,
+            take: 10,
+            select: {
+              points: true,
+              rank: true,
+              tournament: {
+                select: {
+                  id: true,
+                  name: true,
+                  location: true,
+                  startDate: true,
+                  endDate: true,
+                  status: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      })
+    );
 
     if (!player) {
       return NextResponse.json(
-        { error: "اللاعب غير موجود" },
+        errorResponse("اللاعب غير موجود", null),
         { status: 404 }
       );
     }
@@ -82,12 +86,12 @@ export async function GET(
       stats,
     };
 
-    return NextResponse.json({ data: response });
+    return NextResponse.json(successResponse(response));
   } catch (error) {
     console.error("Player fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب بيانات اللاعب" },
-      { status: 500 }
+      errorResponse("فشل في الاتصال بقاعدة البيانات", null),
+      { status: 503 }
     );
   }
 }

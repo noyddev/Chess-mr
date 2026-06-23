@@ -34,56 +34,64 @@ async function getTournaments(params: {
   status?: string;
   sort?: string;
 }) {
-  const { page, status, sort } = params;
-  const limit = 20;
-  const skip = (page - 1) * limit;
+  try {
+    const { page, status, sort } = params;
+    const limit = 20;
+    const skip = (page - 1) * limit;
 
-  const where: Record<string, unknown> = {};
-  if (status && status !== "all") {
-    where.status = status.toUpperCase();
-  }
+    const where: Record<string, unknown> = {};
+    if (status && status !== "all") {
+      where.status = status.toUpperCase();
+    }
 
-  const orderBy: Record<string, string> = {};
-  switch (sort) {
-    case "name":
-      orderBy.name = "asc";
-      break;
-    case "playerCount":
-      orderBy.playerCount = "desc";
-      break;
-    default:
-      orderBy.startDate = "desc";
-  }
+    const orderBy: Record<string, string> = {};
+    switch (sort) {
+      case "name":
+        orderBy.name = "asc";
+        break;
+      case "playerCount":
+        orderBy.playerCount = "desc";
+        break;
+      default:
+        orderBy.startDate = "desc";
+    }
 
-  const [tournaments, total] = await Promise.all([
-    prisma.tournament.findMany({
-      where,
-      orderBy,
-      skip,
-      take: limit,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-        federation: true,
+    const [tournaments, total] = await Promise.all([
+      prisma.tournament.findMany({
+        where,
+        orderBy,
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+          federation: true,
+        },
+      }),
+      prisma.tournament.count({ where }),
+    ]);
+
+    return {
+      tournaments,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
       },
-    }),
-    prisma.tournament.count({ where }),
-  ]);
-
-  return {
-    tournaments,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
+    };
+  } catch (error) {
+    console.error("Failed to fetch tournaments:", error);
+    return {
+      tournaments: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+    };
+  }
 }
 
 function getStatusBadge(status: string) {

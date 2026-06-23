@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { withRetry, getLastSyncTime } from "@/lib/database";
+import { successResponse, errorResponse } from "@/lib/api/response";
 import type { TournamentListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -29,25 +31,28 @@ export async function GET(request: Request) {
         orderBy.startDate = "desc";
     }
 
-    const [tournaments, total] = await Promise.all([
-      prisma.tournament.findMany({
-        where,
-        orderBy,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          location: true,
-          startDate: true,
-          endDate: true,
-          status: true,
-          playerCount: true,
-          federation: true,
-        },
-      }),
-      prisma.tournament.count({ where }),
-    ]);
+    const [tournaments, total, lastSync] = await withRetry(async () =>
+      Promise.all([
+        prisma.tournament.findMany({
+          where,
+          orderBy,
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            startDate: true,
+            endDate: true,
+            status: true,
+            playerCount: true,
+            federation: true,
+          },
+        }),
+        prisma.tournament.count({ where }),
+        getLastSyncTime(),
+      ])
+    );
 
     const response: PaginatedResponse<TournamentListItem> = {
       data: tournaments,
@@ -59,12 +64,14 @@ export async function GET(request: Request) {
       },
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(
+      successResponse(response, lastSync)
+    );
   } catch (error) {
     console.error("Tournaments fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب البطولات" },
-      { status: 500 }
+      errorResponse("فشل في الاتصال بقاعدة البيانات", null),
+      { status: 503 }
     );
   }
 }
