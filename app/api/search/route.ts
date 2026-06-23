@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { withRetry } from "@/lib/database";
 import type { LiveSearchResult } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -11,42 +12,44 @@ export async function GET(request: Request) {
       return NextResponse.json({ results: [] });
     }
 
-    const [players, tournaments] = await Promise.all([
-      prisma.player.findMany({
-        where: {
-          name: {
-            contains: query,
-            mode: "insensitive",
+    const [players, tournaments] = await withRetry(async () =>
+      Promise.all([
+        prisma.player.findMany({
+          where: {
+            name: {
+              contains: query,
+              mode: "insensitive",
+            },
           },
-        },
-        take: 5,
-        select: {
-          id: true,
-          name: true,
-          federation: true,
-          lichessTitle: true,
-          fideRating: true,
-        },
-      }),
-      prisma.tournament.findMany({
-        where: {
-          name: {
-            contains: query,
-            mode: "insensitive",
+          take: 5,
+          select: {
+            id: true,
+            name: true,
+            federation: true,
+            lichessTitle: true,
+            fideRating: true,
           },
-          status: {
-            in: ["ACTIVE", "UPCOMING"],
+        }),
+        prisma.tournament.findMany({
+          where: {
+            name: {
+              contains: query,
+              mode: "insensitive",
+            },
+            status: {
+              in: ["ACTIVE", "UPCOMING"],
+            },
           },
-        },
-        take: 5,
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          location: true,
-        },
-      }),
-    ]);
+          take: 5,
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            location: true,
+          },
+        }),
+      ])
+    );
 
     const results: LiveSearchResult[] = [
       ...players.map((p) => ({

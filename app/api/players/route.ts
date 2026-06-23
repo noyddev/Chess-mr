@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { withRetry } from "@/lib/database";
 import type { PlayerListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -32,27 +33,29 @@ export async function GET(request: Request) {
         orderBy.push({ name: "asc" });
     }
 
-    const [players, total] = await Promise.all([
-      prisma.player.findMany({
-        where,
-        orderBy,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          federation: true,
-          lichessUsername: true,
-          lichessTitle: true,
-          fideTitle: true,
-          fideRating: true,
-          lichessRapid: true,
-          lichessBlitz: true,
-          lichessClassical: true,
-        },
-      }),
-      prisma.player.count({ where }),
-    ]);
+    const [players, total] = await withRetry(async () =>
+      Promise.all([
+        prisma.player.findMany({
+          where,
+          orderBy,
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            name: true,
+            federation: true,
+            lichessUsername: true,
+            lichessTitle: true,
+            fideTitle: true,
+            fideRating: true,
+            lichessRapid: true,
+            lichessBlitz: true,
+            lichessClassical: true,
+          },
+        }),
+        prisma.player.count({ where }),
+      ])
+    );
 
     const response: PaginatedResponse<PlayerListItem> = {
       data: players,
@@ -68,7 +71,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Players fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب قائمة اللاعبين" },
+      { error: "فشل في جلب قائمة اللاعبين", data: [], pagination: null },
       { status: 500 }
     );
   }

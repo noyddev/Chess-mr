@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { withRetry } from "@/lib/database";
 import type { TournamentListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
@@ -29,25 +30,27 @@ export async function GET(request: Request) {
         orderBy.startDate = "desc";
     }
 
-    const [tournaments, total] = await Promise.all([
-      prisma.tournament.findMany({
-        where,
-        orderBy,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          location: true,
-          startDate: true,
-          endDate: true,
-          status: true,
-          playerCount: true,
-          federation: true,
-        },
-      }),
-      prisma.tournament.count({ where }),
-    ]);
+    const [tournaments, total] = await withRetry(async () =>
+      Promise.all([
+        prisma.tournament.findMany({
+          where,
+          orderBy,
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            startDate: true,
+            endDate: true,
+            status: true,
+            playerCount: true,
+            federation: true,
+          },
+        }),
+        prisma.tournament.count({ where }),
+      ])
+    );
 
     const response: PaginatedResponse<TournamentListItem> = {
       data: tournaments,
@@ -63,7 +66,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Tournaments fetch error:", error);
     return NextResponse.json(
-      { error: "فشل في جلب البطولات" },
+      { error: "فشل في جلب البطولات", data: [], pagination: null },
       { status: 500 }
     );
   }
