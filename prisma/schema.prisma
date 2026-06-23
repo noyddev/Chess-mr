@@ -120,6 +120,7 @@ model SyncLog {
   source      String
   status      String
   itemsSynced Int       @default(0)
+  skipped     Int       @default(0)
   error       String?
   startedAt   DateTime  @default(now())
   completedAt DateTime?
