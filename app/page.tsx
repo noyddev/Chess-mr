@@ -19,90 +19,103 @@ import {
 import { formatDateShort, getInitials, getDisplayRating } from "@/lib/utils";
 
 async function getHomePageData() {
-  const [
-    activeTournaments,
-    upcomingTournaments,
-    recentTournaments,
-    topPlayers,
-    stats,
-  ] = await Promise.all([
-    prisma.tournament.findMany({
-      where: { status: "ACTIVE" },
-      orderBy: { startDate: "desc" },
-      take: 6,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-      },
-    }),
-    prisma.tournament.findMany({
-      where: { status: "UPCOMING" },
-      orderBy: { startDate: "asc" },
-      take: 3,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-      },
-    }),
-    prisma.tournament.findMany({
-      where: { status: "FINISHED" },
-      orderBy: { endDate: "desc" },
-      take: 5,
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        startDate: true,
-        endDate: true,
-        status: true,
-        playerCount: true,
-      },
-    }),
-    prisma.player.findMany({
-      orderBy: { fideRating: "desc" },
-      take: 10,
-      select: {
-        id: true,
-        name: true,
-        federation: true,
-        lichessTitle: true,
-        fideTitle: true,
-        fideRating: true,
-        lichessRapid: true,
-        lichessBlitz: true,
-        lichessClassical: true,
-      },
-    }),
-    Promise.all([
-      prisma.tournament.count(),
-      prisma.player.count(),
-      prisma.syncLog.findFirst({
-        where: { source: "chess-results", status: "success" },
-        orderBy: { completedAt: "desc" },
-        select: { completedAt: true },
+  try {
+    const [
+      activeTournaments,
+      upcomingTournaments,
+      recentTournaments,
+      topPlayers,
+      stats,
+    ] = await Promise.all([
+      prisma.tournament.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { startDate: "desc" },
+        take: 6,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+        },
       }),
-    ]),
-  ]);
+      prisma.tournament.findMany({
+        where: { status: "UPCOMING" },
+        orderBy: { startDate: "asc" },
+        take: 3,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+        },
+      }),
+      prisma.tournament.findMany({
+        where: { status: "FINISHED" },
+        orderBy: { endDate: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          playerCount: true,
+        },
+      }),
+      prisma.player.findMany({
+        orderBy: { fideRating: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          name: true,
+          federation: true,
+          lichessTitle: true,
+          fideTitle: true,
+          fideRating: true,
+          lichessRapid: true,
+          lichessBlitz: true,
+          lichessClassical: true,
+        },
+      }),
+      Promise.all([
+        prisma.tournament.count(),
+        prisma.player.count(),
+        prisma.syncLog.findFirst({
+          where: { source: "chess-results", status: "success" },
+          orderBy: { completedAt: "desc" },
+          select: { completedAt: true },
+        }),
+      ]),
+    ]);
 
-  return {
-    activeTournaments,
-    upcomingTournaments,
-    recentTournaments,
-    topPlayers,
+    return {
+      activeTournaments,
+      upcomingTournaments,
+      recentTournaments,
+      topPlayers,
     totalTournaments: stats[0],
     totalPlayers: stats[1],
     lastSync: stats[2]?.completedAt,
   };
+  } catch (error) {
+    console.error("Failed to fetch home page data:", error);
+    return {
+      activeTournaments: [],
+      upcomingTournaments: [],
+      recentTournaments: [],
+      topPlayers: [],
+      totalTournaments: 0,
+      totalPlayers: 0,
+      lastSync: null,
+    };
+  }
 }
 
 function TournamentCard({
