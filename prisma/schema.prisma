@@ -26,6 +26,7 @@ model Tournament {
   
   players     TournamentPlayer[]
   rounds      Round[]
+  snapshots   TournamentSnapshot[]
   
   lastSynced  DateTime @default(now())
   createdAt   DateTime @default(now())
@@ -93,9 +94,12 @@ model Round {
   
   tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   pairings     Pairing[]
+  snapshotId   String?
+  snapshot     TournamentSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
   
   @@unique([tournamentId, number])
   @@index([tournamentId])
+  @@index([snapshotId])
 }
 
 model Pairing {
@@ -108,23 +112,58 @@ model Pairing {
   
   whitePlayer   Player? @relation("WhitePlayer", fields: [whitePlayerId], references: [id], onDelete: SetNull)
   blackPlayer   Player? @relation("BlackPlayer", fields: [blackPlayerId], references: [id], onDelete: SetNull)
-  round         Round   @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  round        Round   @relation(fields: [roundId], references: [id], onDelete: Cascade)
   
   @@index([roundId])
   @@index([whitePlayerId])
   @@index([blackPlayerId])
 }
 
+model TournamentSnapshot {
+  id            String    @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  
+  // Snapshot metadata
+  snapshotTime  DateTime  @default(now())
+  source        String    @default("chess-results")  // chess-results, lichess, manual
+  isActive      Boolean   @default(true)  // Is this the current active snapshot?
+  
+  // Cached data as JSON for fallback
+  standingsJson String?   // JSON array of standings
+  pairingsJson  String?   // JSON array of round pairings
+  roundsJson    String?   // JSON array of rounds metadata
+  metaJson      String?   // Additional metadata
+  
+  // Data integrity
+  dataHash      String?   // Hash to detect changes
+  itemCount     Int       @default(0)  // Number of items in snapshot
+  
+  rounds        Round[]
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([tournamentId])
+  @@index([snapshotTime])
+  @@index([isActive])
+}
+
 model SyncLog {
   id          String    @id @default(cuid())
   source      String
-  status      String
+  status      String    // pending, success, failed, partial
   itemsSynced Int       @default(0)
   skipped     Int       @default(0)
   error       String?
+  errorDetails String?  // Full stack trace or additional info
   startedAt   DateTime  @default(now())
   completedAt DateTime?
   
+  // Sync metadata
+  syncedTournaments Int @default(0)
+  syncedPlayers    Int @default(0)
+  
   @@index([source])
   @@index([startedAt])
+  @@index([status])
 }

@@ -18,12 +18,13 @@ import {
   Calendar,
   MapPin,
   Users,
-  Clock,
   Trophy,
   Activity,
   RefreshCw,
+  Clock,
 } from "lucide-react";
 import { formatDate, formatDateShort, getInitials, getResultColor } from "@/lib/utils";
+import { StaleDataAlert, SyncStatusBadge } from "@/components/features/stale-data-alert";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +158,14 @@ export default async function TournamentPage({ params }: TournamentPageProps) {
           </div>
         </div>
       </section>
+
+      {/* Stale Data Alert */}
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-4">
+        <StaleDataAlert
+          lastSynced={tournament.lastSynced}
+          status={tournament.status}
+        />
+      </div>
 
       {/* Tabs Content */}
       <section className="py-8">
