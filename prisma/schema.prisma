@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TournamentStatus {
+  UPCOMING
+  ACTIVE
+  FINISHED
+}
+
+model Tournament {
+  id          String   @id @default(cuid())
+  externalId  String   @unique
+  name        String
+  location    String
+  startDate   DateTime
+  endDate     DateTime
+  status      TournamentStatus @default(UPCOMING)
+  federation  String   @default("Mauritania")
+  playerCount Int      @default(0)
+  
+  players     TournamentPlayer[]
+  rounds      Round[]
+  snapshots   TournamentSnapshot[]
+  
+  lastSynced  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([status])
+  @@index([startDate])
+  @@index([externalId])
+}
+
+model TournamentPlayer {
+  id            String    @id @default(cuid())
+  tournamentId  String
+  playerId      String
+  seed          Int?
+  points        Float     @default(0)
+  rank          Int?
+  tiebreak1     Float?
+  tiebreak2     Float?
+  tiebreak3     Float?
+  
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  player        Player     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  
+  @@unique([tournamentId, playerId])
+  @@index([tournamentId])
+  @@index([playerId])
+}
+
+model Player {
+  id              String    @id @default(cuid())
+  lichessUsername String?   @unique
+  fideId          String?   @unique
+  name            String
+  federation      String    @default("Mauritania")
+  
+  lichessRapid     Int?
+  lichessBlitz     Int?
+  lichessClassical Int?
+  lichessTitle     String?
+  lichessLastSeen  DateTime?
+  
+  fideRating     Int?
+  fideTitle      String?
+  
+  tournaments    TournamentPlayer[]
+  whitePairings  Pairing[] @relation("WhitePlayer")
+  blackPairings  Pairing[] @relation("BlackPlayer")
+  
+  lichessSyncedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([name])
+  @@index([lichessUsername])
+  @@index([fideId])
+}
+
+model Round {
+  id           String    @id @default(cuid())
+  tournamentId String
+  number       Int
+  name         String?
+  startTime    DateTime?
+  
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  pairings     Pairing[]
+  snapshotId   String?
+  snapshot     TournamentSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  
+  @@unique([tournamentId, number])
+  @@index([tournamentId])
+  @@index([snapshotId])
+}
+
+model Pairing {
+  id            String   @id @default(cuid())
+  roundId       String
+  board         Int?
+  whitePlayerId String?
+  blackPlayerId String?
+  result        String?
+  
+  whitePlayer   Player? @relation("WhitePlayer", fields: [whitePlayerId], references: [id], onDelete: SetNull)
+  blackPlayer   Player? @relation("BlackPlayer", fields: [blackPlayerId], references: [id], onDelete: SetNull)
+  round        Round   @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  
+  @@index([roundId])
+  @@index([whitePlayerId])
+  @@index([blackPlayerId])
+}
+
+model TournamentSnapshot {
+  id            String    @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  
+  // Snapshot metadata
+  snapshotTime  DateTime  @default(now())
+  source        String    @default("chess-results")  // chess-results, lichess, manual
+  isActive      Boolean   @default(true)  // Is this the current active snapshot?
+  
+  // Cached data as JSON for fallback
+  standingsJson String?   // JSON array of standings
+  pairingsJson  String?   // JSON array of round pairings
+  roundsJson    String?   // JSON array of rounds metadata
+  metaJson      String?   // Additional metadata
+  
+  // Data integrity
+  dataHash      String?   // Hash to detect changes
+  itemCount     Int       @default(0)  // Number of items in snapshot
+  
+  rounds        Round[]
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([tournamentId])
+  @@index([snapshotTime])
+  @@index([isActive])
+}
+
+model SyncLog {
+  id          String    @id @default(cuid())
+  source      String
+  status      String    // pending, success, failed, partial
+  itemsSynced Int       @default(0)
+  skipped     Int       @default(0)
+  error       String?
+  errorDetails String?  // Full stack trace or additional info
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  
+  // Sync metadata
+  syncedTournaments Int @default(0)
+  syncedPlayers    Int @default(0)
+  
+  @@index([source])
+  @@index([startedAt])
+  @@index([status])
+}

@@ -1,0 +1,43 @@
+# Chess.MR Scheduled Sync Jobs
+# 
+# This file defines the sync schedule for the Chess.MR platform.
+# Use with Vercel Cron Jobs, GitHub Actions, or any cron scheduler.
+#
+# Chess-Results sync: Every 5 minutes for active tournaments
+# Lichess sync: Every 24 hours for player ratings
+
+version: '1'
+
+cronJobs:
+  # Sync active tournaments every 5 minutes
+  - name: "sync-tournaments"
+    description: "Sync tournaments from Chess-Results (every 5 minutes)"
+    schedule: "*/5 * * * *"  # Every 5 minutes
+    url: "/api/sync?source=tournaments"
+    method: "POST"
+    timeout: 120  # 2 minutes max
+    retry:
+      attempts: 3
+      delay: 30  # seconds between retries
+
+  # Sync player ratings daily
+  - name: "sync-players"
+    description: "Sync player ratings from Lichess (daily)"
+    schedule: "0 2 * * *"  # 2 AM daily
+    url: "/api/sync?source=players"
+    method: "POST"
+    timeout: 300  # 5 minutes max
+    retry:
+      attempts: 3
+      delay: 60
+
+  # Full sync weekly (optional - for deep reconciliation)
+  - name: "full-sync"
+    description: "Run full sync of all data (weekly)"
+    schedule: "0 3 * * 0"  # 3 AM every Sunday
+    url: "/api/sync?source=all"
+    method: "POST"
+    timeout: 600  # 10 minutes max
+    retry:
+      attempts: 2
+      delay: 120
