@@ -38,12 +38,15 @@ export class TournamentScraper {
   /**
    * Scrape active tournaments from Chess-Results for Mauritania
    * This uses the Chess-Results pagination system
+   * Federation code: MTN (Mauritania)
    */
   async scrapeActiveTournaments(): Promise<ScrapedTournament[]> {
     try {
       // Chess-Results uses a specific URL pattern for federations
-      // MR = Mauritania country code
-      const url = `${this.baseUrl}/tnrarrer.aspx?From=R&Fed=MR&Flag=h`;
+      // MTN = Mauritania FIDE federation code
+      const url = `${this.baseUrl}/tnrarrer.aspx?From=R&Fed=MTN&Flag=h`;
+      
+      console.log(`[CHESS_RESULTS] Scraping tournaments from: ${url}`);
 
       const response = await fetch(url, {
         headers: {

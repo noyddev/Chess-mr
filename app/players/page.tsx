@@ -32,12 +32,14 @@ function PlayersContent() {
     totalPages: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [sort, setSort] = useState(searchParams.get("sort") || "name");
 
   useEffect(() => {
     const fetchPlayers = async () => {
       setIsLoading(true);
+      setError(null);
       try {
         const params = new URLSearchParams({
           page: pagination.page.toString(),
@@ -46,14 +48,47 @@ function PlayersContent() {
           sort,
         });
 
+        console.log("[PLAYERS_PAGE] Fetching players from /api/players?", params.toString());
+
         const res = await fetch(`/api/players?${params}`);
-        if (res.ok) {
-          const data: PaginatedResponse<PlayerListItem> = await res.json();
-          setPlayers(data.data);
-          setPagination(data.pagination);
+        
+        // Check response status
+        if (!res.ok) {
+          console.error(`[PLAYERS_PAGE_ERROR] API returned status ${res.status}`);
+          const errorText = await res.text();
+          console.error("[PLAYERS_PAGE_ERROR] Response body:", errorText);
+          throw new Error(`API returned ${res.status}`);
         }
-      } catch (error) {
-        console.error("Failed to fetch players:", error);
+
+        // Check content type
+        const contentType = res.headers.get("content-type");
+        if (!contentType?.includes("application/json")) {
+          console.error("[PLAYERS_PAGE_ERROR] Expected JSON but got:", contentType);
+          const text = await res.text();
+          console.error("[PLAYERS_PAGE_ERROR] Response:", text.substring(0, 500));
+          throw new Error("Invalid content type");
+        }
+
+        const data: PaginatedResponse<PlayerListItem> = await res.json();
+        
+        // Defensive coding - never crash on malformed data
+        const safeData = {
+          data: data?.data ?? [],
+          pagination: data?.pagination ?? { page: 1, limit: 30, total: 0, totalPages: 0 },
+        };
+        
+        console.log("[PLAYERS_PAGE] Received data:", {
+          playerCount: safeData.data.length,
+          total: safeData.pagination.total,
+        });
+        
+        setPlayers(safeData.data);
+        setPagination(safeData.pagination);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+        console.error("[PLAYERS_PAGE_ERROR] Failed to fetch players:", errorMessage);
+        console.error("[PLAYERS_PAGE_ERROR] Stack:", err instanceof Error ? err.stack : undefined);
+        setError(errorMessage);
       } finally {
         setIsLoading(false);
       }
@@ -137,6 +172,12 @@ function PlayersContent() {
                 </Card>
               ))}
             </div>
+          ) : error ? (
+            <Card className="flex flex-col items-center justify-center py-16">
+              <Users className="h-16 w-16 text-red-400 mb-4" />
+              <h3 className="text-lg font-semibold mb-2 text-red-600">خطأ في جلب البيانات</h3>
+              <p className="text-muted-foreground text-center max-w-md">{error}</p>
+            </Card>
           ) : players.length > 0 ? (
             <>
               <div className="mb-4 text-sm text-muted-foreground">
