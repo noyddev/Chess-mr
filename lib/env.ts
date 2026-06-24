@@ -1,6 +1,7 @@
 /**
  * Environment Variable Validation
  * Ensures all required environment variables are present in production
+ * Uses strict type safety with type guards for union narrowing
  */
 
 export interface EnvValidation {
@@ -10,6 +11,7 @@ export interface EnvValidation {
   warnings: string[];
 }
 
+// Type definitions for strict union handling
 const REQUIRED_VARS = [
   "DATABASE_URL",
 ] as const;
@@ -26,6 +28,19 @@ const URL_VARS = [
   "NEXT_PUBLIC_SITE_URL",
   "NEXT_PUBLIC_API_URL",
 ] as const;
+
+// Derived types from const assertions
+type RequiredVar = typeof REQUIRED_VARS[number];
+type OptionalVar = typeof OPTIONAL_VARS[number];
+type UrlVar = typeof URL_VARS[number];
+
+/**
+ * Type guard: checks if a string is a valid URL variable name
+ * This allows safe narrowing from string to UrlVar union
+ */
+function isUrlVar(varName: string): varName is UrlVar {
+  return (URL_VARS as readonly string[]).includes(varName);
+}
 
 /**
  * Validate URL format for environment variables that should be URLs
@@ -52,7 +67,7 @@ export function validateEnv(): EnvValidation {
     const value = process.env[varName];
     if (!value) {
       missing.push(varName);
-    } else if (URL_VARS.includes(varName) && !isValidUrl(value)) {
+    } else if (isUrlVar(varName) && !isValidUrl(value)) {
       invalid.push(varName);
     }
   }
@@ -62,18 +77,18 @@ export function validateEnv(): EnvValidation {
     const value = process.env[varName];
     if (!value && varName !== "LICHESS_TOKEN") {
       warnings.push(`${varName} is not set`);
-    } else if (URL_VARS.includes(varName) && value && !isValidUrl(value)) {
+    } else if (isUrlVar(varName) && value && !isValidUrl(value)) {
       invalid.push(varName);
     }
   }
 
   // Log validation results
   if (missing.length > 0) {
-    console.error("[ENV_VALIDATION_ERROR] Missing required environment variables:", missing);
+    console.error("[ENV_ERROR] Missing required environment variables:", missing);
   }
   
   if (invalid.length > 0) {
-    console.error("[ENV_VALIDATION_ERROR] Invalid environment variables:", invalid);
+    console.error("[ENV_ERROR] Invalid environment variables:", invalid);
   }
   
   if (warnings.length > 0) {
@@ -106,12 +121,12 @@ export function getDatabaseUrl(): string {
   
   if (!dbUrl) {
     console.error("[DATABASE_ERROR] DATABASE_URL is not set");
-    throw new Error("DATABASE_URL environment variable is required");
+    throw new Error("[ENV_ERROR] Missing required environment variable: DATABASE_URL");
   }
   
   if (!isValidUrl(dbUrl)) {
     console.error("[DATABASE_ERROR] DATABASE_URL is not a valid URL");
-    throw new Error("DATABASE_URL must be a valid URL");
+    throw new Error("[ENV_ERROR] Invalid DATABASE_URL: must be a valid HTTP/HTTPS URL");
   }
   
   return dbUrl;
