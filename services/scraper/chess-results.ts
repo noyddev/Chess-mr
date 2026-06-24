@@ -188,24 +188,43 @@ export class TournamentScraper {
 
   private parsePlayers(html: string): ScrapedPlayer[] {
     const players: ScrapedPlayer[] = [];
-    const rowPattern = /<tr[^>]*class="VRg\d?"[^>]*>([\s\S]*?)<\/tr>/gi;
+    // Chess-Results uses CRg1/CRg2 classes for player rows (not VRg)
+    // Pattern: <tr class="CRg1 MTN"><td class="CRc">rank</td><td class="CR"></td><td class="CR">Name</td>...
+    const rowPattern = /<tr[^>]*class="CRg[12](?:\s+[^"]*)?"[^>]*>([\s\S]*?)<\/tr>/gi;
     const matches = html.matchAll(rowPattern);
 
     for (const match of matches) {
       const rowHtml = match[1];
-      const nameMatch = rowHtml.match(/<a[^>]*>([^<]+)<\/a>/i);
-      const fideMatch = rowHtml.match(/FIDE\s*:\s*(\d+)/i);
-      const seedMatch = rowHtml.match(/<td[^>]*>(\d+)<\/td>/);
-      const pointsMatch = rowHtml.match(/Pts[:\s]*(\d+[\.,]\d+)/i);
-      const rankMatch = rowHtml.match(/<b>(\d+)<\/b>/);
-
-      if (nameMatch) {
+      
+      // Skip header rows
+      if (rowHtml.includes('<th') || rowHtml.includes('No.') || rowHtml.includes('Name')) {
+        continue;
+      }
+      
+      // Extract all <td> cells (must use [\s\S] to capture HTML inside)
+      const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+      
+      if (cells.length < 4) continue;
+      
+      // Structure: [rank, empty, name, fideId, fed, rating]
+      const rankCell = cells[0]?.[1] || "";
+      const nameCell = cells[2]?.[1] || "";
+      const fideCell = cells[3]?.[1] || "";
+      const ratingCell = cells[5]?.[1] || "";
+      
+      const rank = parseInt(rankCell, 10);
+      const rating = parseInt(ratingCell, 10);
+      const name = nameCell.trim();
+      
+      if (name && !name.match(/^(No\.?|Name|FIDE|Fed|Rtg|Points|Pts)$/i) && rank > 0) {
+        // Extract FIDE ID from anchor tag or plain text
+        const fideMatch = fideCell.match(/profile\/(\d+)/) || fideCell.match(/(\d{6,})/);
         players.push({
-          name: this.decodeHtmlEntities(nameMatch[1].trim()),
+          name: this.decodeHtmlEntities(name),
           fideId: fideMatch ? fideMatch[1] : undefined,
-          seed: seedMatch ? parseInt(seedMatch[1], 10) : undefined,
-          points: pointsMatch ? parseFloat(pointsMatch[1].replace(",", ".")) : undefined,
-          rank: rankMatch ? parseInt(rankMatch[1], 10) : undefined,
+          seed: undefined,
+          points: undefined,
+          rank: rank,
         });
       }
     }
