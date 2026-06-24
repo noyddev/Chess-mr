@@ -27,6 +27,12 @@ const URL_VARS = [
   "NEXT_PUBLIC_API_URL",
 ] as const;
 
+type UrlVar = typeof URL_VARS[number];
+
+function isUrlVar(v: string): v is UrlVar {
+  return (URL_VARS as readonly string[]).includes(v);
+}
+
 /**
  * Validate URL format for environment variables that should be URLs
  */
@@ -62,7 +68,7 @@ export function validateEnv(): EnvValidation {
     const value = process.env[varName];
     if (!value && varName !== "LICHESS_TOKEN") {
       warnings.push(`${varName} is not set`);
-    } else if (URL_VARS.includes(varName) && value && !isValidUrl(value)) {
+    } else if (isUrlVar(varName) && value && !isValidUrl(value)) {
       invalid.push(varName);
     }
   }
