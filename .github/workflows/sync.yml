@@ -1,0 +1,33 @@
+name: Chess Data Sync
+
+on:
+  schedule:
+    # Every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Trigger Chess.MR Sync
+        run: |
+          curl -s -X POST "${{ secrets.CHESS_MR_SYNC_URL }}" \
+            -H "Content-Type: application/json" \
+            || echo "Sync endpoint not configured, skipping"
+
+  sync-detailed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: sync
+    
+    steps:
+      - name: Trigger Detailed Sync
+        run: |
+          # Sync tournament details for active tournaments
+          curl -s -X POST "${{ secrets.CHESS_MR_SYNC_URL }}/details" \
+            -H "Content-Type: application/json" \
+            || echo "Sync endpoint not configured"

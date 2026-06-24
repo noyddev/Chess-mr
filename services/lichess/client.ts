@@ -83,6 +83,29 @@ export class LichessClient {
   }
 
   /**
+   * Search for players by country (Mauritania = MR)
+   * GET /api/player?nb=100&filter[country]=MR
+   */
+  async getPlayersByCountry(countryCode: string = "MR", count: number = 100): Promise<string[]> {
+    try {
+      const response = await rateLimitedFetch(
+        `${LICHESS_API_BASE}/player?nb=${count}&filter[country]=${countryCode}`
+      );
+
+      if (!response.ok) {
+        console.error(`Lichess player search error: ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json();
+      return data.list || [];
+    } catch (error) {
+      console.error(`Failed to fetch players from ${countryCode}:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Get real-time users status
    * GET /api/users/status?ids=...
    */

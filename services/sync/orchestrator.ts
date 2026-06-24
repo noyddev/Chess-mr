@@ -1,6 +1,7 @@
 import prisma from "@/lib/db";
 import { lichessClient } from "@/services/lichess/client";
 import { tournamentScraper } from "@/services/scraper/chess-results";
+import { syncMauritanianLichessPlayers } from "./syncMauritania";
 
 export interface SyncResult {
   success: boolean;
@@ -184,8 +185,12 @@ export async function syncTournaments(): Promise<SyncResult> {
 export async function syncPlayers(): Promise<SyncResult> {
   const startTime = new Date();
   let syncLogId: string | null = null;
-  
   try {
+    // Step 1: Sync all Mauritanian Lichess players
+    syncMauritanianLichessPlayers().catch(err => {
+      console.error("[SYNC] Mauritania sync failed:", err);
+    });
+
     const syncLog = await prisma.syncLog.create({
       data: {
         source: "lichess",
