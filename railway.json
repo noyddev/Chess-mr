@@ -1,0 +1,21 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "npm run build",
+    "startCommand": "npm start"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "cron": [
+    {
+      "name": "sync",
+      "command": "curl -X POST https://chess-mr.up.railway.app/api/sync/cron",
+      "schedule": "0 */6 * * *",
+      "description": "Sync tournaments and players every 6 hours"
+    }
+  ]
+}
