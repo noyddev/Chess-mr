@@ -39,6 +39,16 @@ async function getTournaments(params: {
     const limit = 20;
     const skip = (page - 1) * limit;
 
+    // Validate DATABASE_URL exists
+    if (!process.env.DATABASE_URL) {
+      console.error("[TOURNAMENTS_PAGE_ERROR] DATABASE_URL environment variable is not set");
+      return {
+        tournaments: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+        error: "Database configuration missing",
+      };
+    }
+
     const where: Record<string, unknown> = {};
     if (status && status !== "all") {
       where.status = status.toUpperCase();
@@ -55,6 +65,8 @@ async function getTournaments(params: {
       default:
         orderBy.startDate = "desc";
     }
+
+    console.log("[TOURNAMENTS_PAGE] Fetching tournaments with params:", { page, status, sort, where, skip, limit });
 
     const [tournaments, total] = await Promise.all([
       prisma.tournament.findMany({
@@ -76,6 +88,8 @@ async function getTournaments(params: {
       prisma.tournament.count({ where }),
     ]);
 
+    console.log(`[TOURNAMENTS_PAGE] Found ${tournaments.length} tournaments (total: ${total})`);
+
     return {
       tournaments,
       pagination: {
@@ -86,10 +100,16 @@ async function getTournaments(params: {
       },
     };
   } catch (error) {
-    console.error("Failed to fetch tournaments:", error);
+    console.error("[TOURNAMENTS_PAGE_ERROR] Failed to fetch tournaments:", error);
+    console.error("[TOURNAMENTS_PAGE_ERROR] Error details:", {
+      name: error instanceof Error ? error.name : "Unknown",
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return {
       tournaments: [],
       pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
@@ -115,14 +135,28 @@ export default async function TournamentsPage({
 }: TournamentsPageProps) {
   const params = await searchParams;
   const page = parseInt(params.page || "1");
-  const { tournaments, pagination } = await getTournaments({
+  const { tournaments: rawTournaments, pagination: rawPagination, error } = await getTournaments({
     page,
     status: params.status,
     sort: params.sort,
   });
 
+  // Defensive coding - ensure we never crash on null/undefined
+  const tournaments = rawTournaments ?? [];
+  const pagination = rawPagination ?? { page: 1, limit: 20, total: 0, totalPages: 0 };
+
   const currentStatus = params.status || "all";
   const currentSort = params.sort || "startDate";
+
+  // Log page load with diagnostics
+  console.log("[TOURNAMENTS_PAGE] Page loaded:", {
+    page,
+    tournamentsCount: tournaments.length,
+    total: pagination.total,
+    hasError: !!error,
+    errorMessage: error,
+    DATABASE_URL_SET: !!process.env.DATABASE_URL,
+  });
 
   return (
     <div className="min-h-screen">
@@ -137,6 +171,20 @@ export default async function TournamentsPage({
           </div>
         </div>
       </section>
+
+      {/* Error Banner - Show when there's a database issue */}
+      {error && (
+        <section className="border-b border-border bg-red-50 dark:bg-red-950/20">
+          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <Trophy className="h-5 w-5" />
+              <p className="text-sm">
+                <strong>مشكلة في قاعدة البيانات:</strong> {error}
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Filters */}
       <section className="border-b border-border bg-background">
@@ -254,7 +302,9 @@ export default async function TournamentsPage({
               <p className="text-muted-foreground text-center max-w-md">
                 {currentStatus !== "all"
                   ? `لا توجد بطولات ${currentStatus === "active" ? "نشطة" : currentStatus === "upcoming" ? "قادمة" : "منتهية"} حالياً`
-                  : "لم يتم العثور على بطولات. سيتم إضافة البطولات عند توفرها."}
+                  : error
+                    ? "حدث خطأ في جلب البيانات. يرجى المحاولة لاحقاً."
+                    : "لم يتم العثور على بطولات. سيتم إضافة البطولات عند توفرها."}
               </p>
             </Card>
           )}

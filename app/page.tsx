@@ -66,7 +66,25 @@ interface HomePageData {
 }
 
 async function getHomePageData(): Promise<HomePageData> {
+  // Check DATABASE_URL first
+  if (!process.env.DATABASE_URL) {
+    console.error("[HOMEPAGE_ERROR] DATABASE_URL environment variable is not set");
+    return {
+      activeTournaments: [],
+      upcomingTournaments: [],
+      recentTournaments: [],
+      topPlayers: [],
+      totalTournaments: 0,
+      totalPlayers: 0,
+      lastSync: null,
+      systemStatus: "error",
+      databaseConnected: false,
+    };
+  }
+
   try {
+    console.log("[HOMEPAGE] Fetching data from database...");
+    
     const [
       activeTournaments,
       upcomingTournaments,
@@ -142,6 +160,15 @@ async function getHomePageData(): Promise<HomePageData> {
       ]),
     ]);
 
+    console.log("[HOMEPAGE] Data fetched successfully:", {
+      activeTournaments: activeTournaments.length,
+      upcomingTournaments: upcomingTournaments.length,
+      recentTournaments: recentTournaments.length,
+      topPlayers: topPlayers.length,
+      totalTournaments: stats[0],
+      totalPlayers: stats[1],
+    });
+
     return {
       activeTournaments,
       upcomingTournaments,
@@ -154,7 +181,12 @@ async function getHomePageData(): Promise<HomePageData> {
       databaseConnected: true,
     };
   } catch (error) {
-    console.error("Failed to fetch home page data:", error);
+    console.error("[HOMEPAGE_ERROR] Failed to fetch home page data:", error);
+    console.error("[HOMEPAGE_ERROR] Error details:", {
+      name: error instanceof Error ? error.name : "Unknown",
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return {
       activeTournaments: [],
       upcomingTournaments: [],
