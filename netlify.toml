@@ -1,11 +1,9 @@
 [build]
   command = "npx prisma generate && npm run build"
   publish = ".next"
-  environment = { NODE_VERSION = "20" }
 
 [build.environment]
   NODE_OPTIONS = "--max-old-space-size=4096"
-  PRISMA_GENERATE_DATASOURCE = "0"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -14,9 +12,6 @@
   directory = ".next/server/pages/api"
   included_files = ["prisma/**/*", ".next/prisma/**/*"]
   node_bundler = "esbuild"
-
-[functions."*"]
-  environment = { DATABASE_URL }
 
 [[headers]]
   for = "/api/*"
@@ -32,11 +27,11 @@
     X-Frame-Options = "DENY"
     X-XSS-Protection = "1; mode=block"
 
-[context.production.environment]
-  NODE_ENV = "production"
+[context.production]
+  environment = { NODE_ENV = "production" }
 
-[context.deploy-preview.environment]
-  NODE_ENV = "preview"
+[context.deploy-preview]
+  environment = { NODE_ENV = "preview" }
 
-[context.branch-deploy.environment]
-  NODE_ENV = "development"
+[context.branch-deploy]
+  environment = { NODE_ENV = "development" }
