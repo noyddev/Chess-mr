@@ -10,7 +10,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { syncTournaments, syncPlayers, runFullSync } from "@/services/sync/orchestrator";
+import { syncTournaments, syncPlayers, runFullSync, syncAllTournamentDetails } from "@/services/sync/orchestrator";
 import { createSnapshot, getSyncStatusWithSnapshot } from "@/services/sync/snapshot";
 
 export async function POST(request: Request) {
@@ -30,6 +30,10 @@ export async function POST(request: Request) {
         break;
       case "sync-all":
         result = await runFullSync();
+        break;
+      case "sync-tournament-details":
+        // Sync details (players, standings, rounds) for all tournaments
+        result = await syncAllTournamentDetails();
         break;
       case "snapshot-all":
         // Create snapshots for all active tournaments
@@ -51,7 +55,7 @@ export async function POST(request: Request) {
         break;
       default:
         return NextResponse.json(
-          { error: "Invalid action. Use: sync-tournaments, sync-players, sync-all, snapshot-all" },
+          { error: "Invalid action. Use: sync-tournaments, sync-players, sync-all, sync-tournament-details, snapshot-all" },
           { status: 400 }
         );
     }

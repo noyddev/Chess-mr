@@ -430,6 +430,82 @@ export async function getSyncStatus() {
 }
 
 /**
+ * Sync details for all tournaments (players, standings, rounds)
+ */
+export async function syncAllTournamentDetails(): Promise<{
+  success: boolean;
+  itemsSynced: number;
+  failed: number;
+  source: string;
+}> {
+  const startTime = new Date();
+  let syncLogId: string | null = null;
+
+  try {
+    const syncLog = await prisma.syncLog.create({
+      data: {
+        source: "chess-results-details",
+        status: "pending",
+        startedAt: startTime,
+      },
+    });
+    syncLogId = syncLog.id;
+
+    // Get all tournaments with their externalIds
+    const tournaments = await prisma.tournament.findMany({
+      select: { id: true, externalId: true, name: true },
+      orderBy: { startDate: "desc" },
+    });
+
+    console.log(`[SYNC] Syncing details for ${tournaments.length} tournaments...`);
+
+    let itemsSynced = 0;
+    let failed = 0;
+
+    for (const tournament of tournaments) {
+      try {
+        const result = await syncTournamentDetails(tournament.externalId);
+        if (result.success) {
+          itemsSynced++;
+        } else {
+          failed++;
+          console.error(`[SYNC] Failed to sync ${tournament.name}: ${result.error}`);
+        }
+      } catch (err) {
+        failed++;
+        console.error(`[SYNC] Error syncing ${tournament.name}:`, err);
+      }
+
+      // Rate limiting - wait 500ms between requests
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    await prisma.syncLog.update({
+      where: { id: syncLogId },
+      data: {
+        status: failed === 0 ? "success" : failed < itemsSynced ? "partial" : "failed",
+        itemsSynced,
+        skipped: failed,
+        completedAt: new Date(),
+      },
+    });
+
+    return { success: failed === 0, itemsSynced, failed, source: "chess-results-details" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+
+    if (syncLogId) {
+      await prisma.syncLog.update({
+        where: { id: syncLogId },
+        data: { status: "failed", error: message, completedAt: new Date() },
+      });
+    }
+
+    return { success: false, itemsSynced: 0, failed: 0, source: "chess-results-details" };
+  }
+}
+
+/**
  * Run full sync (tournaments + players)
  */
 export async function runFullSync(): Promise<{
