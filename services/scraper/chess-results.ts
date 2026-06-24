@@ -95,10 +95,8 @@ export class TournamentScraper {
           else if (statusCode === "5") status = "FINISHED";
         }
 
-        const locationMatch = rowHtml.match(/<\/small>\s*([^<]{2,30})\s*<\/td>/i);
-        const location = locationMatch 
-          ? this.decodeHtmlEntities(locationMatch[1].trim())
-          : "موريتانيا";
+        // Location not available on federation list page - default to Mauritania
+        const location = "موريتانيا";
 
         const now = new Date();
         let startDate = new Date();
