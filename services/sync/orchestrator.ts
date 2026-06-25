@@ -363,21 +363,44 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
     let itemsSynced = 0;
     for (const scrapedPlayer of details.players) {
       try {
-        // Find or create player
-        let player = await prisma.player.findFirst({
-          where: { name: scrapedPlayer.name }
-        });
+        // Try to find player by FIDE ID first, then by name
+        let player = scrapedPlayer.fideId 
+          ? await prisma.player.findFirst({ where: { fideId: scrapedPlayer.fideId } })
+          : null;
+        
+        if (!player) {
+          player = await prisma.player.findFirst({
+            where: { name: scrapedPlayer.name }
+          });
+        }
 
         if (!player && scrapedPlayer.name) {
           player = await prisma.player.create({
             data: {
               name: scrapedPlayer.name,
               federation: scrapedPlayer.federation || "موريتانيا",
+              fideId: scrapedPlayer.fideId || null,
             }
           });
         }
 
         if (player && tournament.id) {
+          // Update player with FIDE ID if we have it and player doesn't
+          const updateData: Record<string, unknown> = {};
+          if (scrapedPlayer.fideId && !player.fideId) {
+            updateData.fideId = scrapedPlayer.fideId;
+          }
+          if (scrapedPlayer.rating && scrapedPlayer.rating > 0) {
+            updateData.fideRating = scrapedPlayer.rating;
+          }
+          
+          if (Object.keys(updateData).length > 0) {
+            await prisma.player.update({
+              where: { id: player.id },
+              data: updateData,
+            });
+          }
+
           // Create or update tournament player record
           await prisma.tournamentPlayer.upsert({
             where: {
@@ -399,16 +422,6 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
               rank: scrapedPlayer.rank,
             }
           });
-          
-          // Update player rating if available
-          if (scrapedPlayer.rating && scrapedPlayer.rating > 0) {
-            await prisma.player.update({
-              where: { id: player.id },
-              data: { 
-                fideRating: scrapedPlayer.rating,
-              },
-            }).catch(() => {}); // Ignore errors
-          }
           
           itemsSynced++;
         }
