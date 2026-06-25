@@ -301,71 +301,82 @@ export class TournamentScraper {
 
   private parsePlayers(html: string): ScrapedPlayer[] {
     const players: ScrapedPlayer[] = [];
+    const seenNames = new Set<string>();
     
     // Try multiple patterns for player rows
     const patterns = [
-      // Pattern 1: CRg1/CRg2 class rows with rank in first cell
+      // Pattern 1: CRg1/CRg2 class rows with full row content
       /<tr[^>]*class="CRg[12][^"]*"[^>]*>([\s\S]*?)<\/tr>/gi,
-      // Pattern 2: Any row with rank number
+      // Pattern 2: Any row with rank number in CRc cell
       /<tr[^>]*>([\s\S]*?)<td[^>]*class="CRc"[^>]*>(\d+)<\/td>([\s\S]*?)<\/tr>/gi,
     ];
 
     for (const pattern of patterns) {
-      const matches = html.matchAll(pattern);
+      const matches = [...html.matchAll(pattern)];
       for (const match of matches) {
         let rowHtml: string;
         let rank: number;
         
         if (pattern.source.includes('CRc')) {
           // Pattern 2: rank is in match[2]
-          rank = parseInt(match[2], 10);
+          const maybeRank = parseInt(match[2], 10);
+          if (isNaN(maybeRank) || maybeRank <= 0) continue;
+          rank = maybeRank;
           rowHtml = match[1] + match[3];
         } else {
           // Pattern 1: extract rank from first cell
           rowHtml = match[1];
           const rankMatch = rowHtml.match(/<td[^>]*class="CRc"[^>]*>([\s\S]*?)<\/td>/i);
-          if (rankMatch) {
-            rank = parseInt(rankMatch[1].replace(/<[^>]*>/g, '').trim(), 10);
-          } else {
-            continue;
-          }
+          if (!rankMatch) continue;
+          const maybeRank = parseInt(rankMatch[1].replace(/<[^>]*>/g, '').trim(), 10);
+          if (isNaN(maybeRank) || maybeRank <= 0) continue;
+          rank = maybeRank;
         }
-        
-        if (isNaN(rank) || rank <= 0) continue;
         
         // Skip header rows
         if (rowHtml.includes('<th') || rowHtml.includes('>No.<') || rowHtml.includes('>Name<')) continue;
         
-        // Extract player name
+        // Extract player name - multiple patterns to catch different HTML formats
         let name = "";
         const namePatterns = [
-          /<td[^>]*class="CR"[^>]*>\s*<a[^>]*>([^<]+)<\/a>\s*<\/td>/i,
+          // Standard: <td class="CR">LastName, FirstName</td>
           /<td[^>]*class="CR"[^>]*>\s*([^<,]+),\s*([^<]+)\s*<\/td>/i,
+          // With link: <td class="CR"><a>Name</a></td>
+          /<td[^>]*class="CR"[^>]*>\s*<a[^>]*>([^<]+)<\/a>\s*<\/td>/i,
+          // Generic td: <td>LastName, FirstName</td>
           /<td[^>]*>\s*([^<,]+),\s*([^<]+)\s*<\/td>/i,
         ];
         
         for (const namePattern of namePatterns) {
           const nameMatch = rowHtml.match(namePattern);
-          if (nameMatch) {
-            name = this.decodeHtmlEntities(nameMatch[1].trim());
+          if (nameMatch && nameMatch[1]) {
+            // Handle both "LastName, FirstName" and "<a>LastName, FirstName</a>" formats
+            const lastName = nameMatch[1].replace(/<[^>]*>/g, '').trim();
+            const firstName = nameMatch[2] ? nameMatch[2].replace(/<[^>]*>/g, '').trim() : '';
+            name = `${lastName}, ${firstName}`;
+            name = this.decodeHtmlEntities(name);
             break;
           }
         }
         
         if (!name || name.length < 3) continue;
+        if (seenNames.has(name.toLowerCase())) continue;
+        seenNames.add(name.toLowerCase());
         
         // Extract FIDE ID
-        const fideMatch = rowHtml.match(/profile\/(\d+)/) || rowHtml.match(/(\d{6,})/);
+        const fideMatch = rowHtml.match(/fide\.com\/profile\/(\d+)/);
         
-        // Extract rating
+        // Extract rating from CRr class cell (rating column)
         const ratingMatch = rowHtml.match(/class="CRr"[^>]*>([^<]+)<\/td>/i);
         let rating: number | undefined;
         if (ratingMatch) {
-          rating = parseInt(ratingMatch[1], 10);
-          if (isNaN(rating)) rating = undefined;
+          const maybeRating = parseInt(ratingMatch[1].trim(), 10);
+          if (!isNaN(maybeRating) && maybeRating > 0) {
+            rating = maybeRating;
+          }
         }
         
-        // Extract points
+        // Extract points from CRp class cell
         const pointsMatch = rowHtml.match(/class="CRp"[^>]*>([^<]+)<\/td>/i);
         let points: number | undefined;
         if (pointsMatch) {
