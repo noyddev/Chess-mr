@@ -343,6 +343,22 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
     });
     const playerNameToId = new Map(allPlayers.map(p => [p.name.toLowerCase(), p.id]));
 
+    // Update tournament with dates if available
+    const updateData: Record<string, unknown> = {
+      playerCount: details.players.length,
+      lastSynced: new Date(),
+    };
+    if (details.startDate) {
+      updateData.startDate = details.startDate;
+    }
+    if (details.endDate) {
+      updateData.endDate = details.endDate;
+    }
+    await prisma.tournament.update({
+      where: { id: tournament.id },
+      data: updateData,
+    });
+
     // Sync players
     let itemsSynced = 0;
     for (const scrapedPlayer of details.players) {
@@ -383,6 +399,17 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
               rank: scrapedPlayer.rank,
             }
           });
+          
+          // Update player rating if available
+          if (scrapedPlayer.rating && scrapedPlayer.rating > 0) {
+            await prisma.player.update({
+              where: { id: player.id },
+              data: { 
+                fideRating: scrapedPlayer.rating,
+              },
+            }).catch(() => {}); // Ignore errors
+          }
+          
           itemsSynced++;
         }
       } catch (err) {
