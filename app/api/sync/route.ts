@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { syncTournaments, syncPlayers, getSyncStatus } from "@/services/sync/orchestrator";
+import { syncTournaments, syncPlayers, syncAllTournamentDetails, getSyncStatus } from "@/services/sync/orchestrator";
 
 export async function POST(request: Request) {
   try {
@@ -12,9 +12,25 @@ export async function POST(request: Request) {
     } else if (source === "tournaments" || !source) {
       const result = await syncTournaments();
       return NextResponse.json(result);
+    } else if (source === "details") {
+      // Sync tournament details (players, rounds, standings) for all tournaments
+      const result = await syncAllTournamentDetails();
+      return NextResponse.json(result);
+    } else if (source === "all") {
+      // Run full sync: tournaments + details + players
+      const [tournamentResult, detailsResult, playerResult] = await Promise.all([
+        syncTournaments(),
+        syncAllTournamentDetails(),
+        syncPlayers(),
+      ]);
+      return NextResponse.json({
+        tournaments: tournamentResult,
+        details: detailsResult,
+        players: playerResult,
+      });
     } else {
       return NextResponse.json(
-        { error: "Invalid source. Use 'tournaments' or 'players'" },
+        { error: "Invalid source. Use 'tournaments', 'players', 'details', or 'all'" },
         { status: 400 }
       );
     }

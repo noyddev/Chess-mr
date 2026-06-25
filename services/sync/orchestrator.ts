@@ -332,6 +332,17 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
       return { success: false, itemsSynced: 0, error: "Tournament not found", source: "chess-results" };
     }
 
+    // Build a map of player names to their database records for pairing resolution
+    const allPlayers = await prisma.player.findMany({
+      where: {
+        tournaments: {
+          some: { tournamentId: tournament.id }
+        }
+      },
+      select: { id: true, name: true }
+    });
+    const playerNameToId = new Map(allPlayers.map(p => [p.name.toLowerCase(), p.id]));
+
     // Sync players
     let itemsSynced = 0;
     for (const scrapedPlayer of details.players) {
@@ -376,6 +387,58 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
         }
       } catch (err) {
         console.error(`Failed to sync player ${scrapedPlayer.name}:`, err);
+      }
+    }
+
+    // Sync rounds and pairings
+    for (const scrapedRound of details.rounds) {
+      try {
+        const round = await prisma.round.upsert({
+          where: {
+            tournamentId_number: {
+              tournamentId: tournament.id,
+              number: scrapedRound.number,
+            }
+          },
+          update: {
+            name: scrapedRound.name,
+            startTime: scrapedRound.startTime,
+          },
+          create: {
+            tournamentId: tournament.id,
+            number: scrapedRound.number,
+            name: scrapedRound.name,
+            startTime: scrapedRound.startTime,
+          }
+        });
+
+        // Sync pairings for this round
+        for (const scrapedPairing of scrapedRound.pairings) {
+          try {
+            const whitePlayerId = scrapedPairing.whitePlayer 
+              ? playerNameToId.get(scrapedPairing.whitePlayer.toLowerCase())
+              : null;
+            const blackPlayerId = scrapedPairing.blackPlayer 
+              ? playerNameToId.get(scrapedPairing.blackPlayer.toLowerCase())
+              : null;
+
+            if (whitePlayerId || blackPlayerId) {
+              await prisma.pairing.create({
+                data: {
+                  roundId: round.id,
+                  board: scrapedPairing.board,
+                  whitePlayerId,
+                  blackPlayerId,
+                  result: scrapedPairing.result,
+                }
+              });
+            }
+          } catch (err) {
+            console.error(`Failed to sync pairing:`, err);
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to sync round ${scrapedRound.number}:`, err);
       }
     }
 

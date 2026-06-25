@@ -4,6 +4,7 @@
 # Use with Vercel Cron Jobs, GitHub Actions, or any cron scheduler.
 #
 # Chess-Results sync: Every 5 minutes for active tournaments
+# Tournament details sync: Every 30 minutes (players, rounds, standings)
 # Lichess sync: Every 24 hours for player ratings
 
 version: '1'
@@ -19,6 +20,17 @@ cronJobs:
     retry:
       attempts: 3
       delay: 30  # seconds between retries
+
+  # Sync tournament details (players, rounds, standings) every 30 minutes
+  - name: "sync-tournament-details"
+    description: "Sync tournament details - players, rounds, standings (every 30 minutes)"
+    schedule: "*/30 * * * *"  # Every 30 minutes
+    url: "/api/sync?source=details"
+    method: "POST"
+    timeout: 600  # 10 minutes max
+    retry:
+      attempts: 3
+      delay: 60  # seconds between retries
 
   # Sync player ratings daily
   - name: "sync-players"
