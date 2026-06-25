@@ -18,6 +18,7 @@ export interface ScrapedPlayer {
   seed?: number;
   points?: number;
   rank?: number;
+  rating?: number;
 }
 
 export interface ScrapedRound {
@@ -157,117 +158,295 @@ export class TournamentScraper {
     return new Date();
   }
 
+  /**
+   * Scrape tournament details - handles ASP.NET postback for older tournaments
+   */
   async scrapeTournamentDetails(externalId: string): Promise<{
     players: ScrapedPlayer[];
     rounds: ScrapedRound[];
   } | null> {
     try {
-      const url = `${this.baseUrl}/tnr${externalId}.aspx?lan=1`;
+      const initialUrl = `${this.baseUrl}/tnr${externalId}.aspx?lan=1`;
 
-      const response = await fetch(url, {
+      // First, get the initial page and extract VIEWSTATE
+      const initialResponse = await fetch(initialUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
       });
 
-      if (!response.ok) {
+      if (!initialResponse.ok) {
+        console.error(`Initial fetch failed: ${initialResponse.status}`);
         return null;
       }
 
-      const html = await response.text();
-      return {
-        players: this.parsePlayers(html),
-        rounds: this.parseRounds(html),
-      };
+      let html = await initialResponse.text();
+      
+      // Extract VIEWSTATE for postback
+      const viewStateMatch = html.match(/id="__VIEWSTATE" value="([^"]+)"/);
+      const viewStateGenMatch = html.match(/id="__VIEWSTATEGENERATOR" value="([^"]+)"/);
+      const eventValidationMatch = html.match(/id="__EVENTVALIDATION" value="([^"]+)"/);
+      
+      // Check if we need to click "Show tournament details" for older tournaments
+      let needsPostback = html.includes('cb_alleDetails') || html.includes('Show tournament details');
+      
+      // First parse players from initial page
+      let players = this.parsePlayers(html);
+      let rounds: ScrapedRound[] = [];
+      
+      // If tournament is older than 5 days OR no players found, try postback
+      if (needsPostback || players.length === 0) {
+        const viewState = viewStateMatch ? viewStateMatch[1] : "";
+        const viewStateGen = viewStateGenMatch ? viewStateGenMatch[1] : "";
+        const eventValidation = eventValidationMatch ? eventValidationMatch[1] : "";
+        
+        // Submit form to show all details
+        const formData = new URLSearchParams({
+          '__EVENTTARGET': '',
+          '__EVENTARGUMENT': '',
+          '__VIEWSTATE': viewState,
+          '__VIEWSTATEGENERATOR': viewStateGen,
+          '__EVENTVALIDATION': eventValidation,
+          'cb_alleDetails': 'Show tournament details',
+        });
+
+        const postResponse = await fetch(initialUrl, {
+          method: 'POST',
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": initialUrl,
+          },
+          body: formData.toString(),
+        });
+
+        if (postResponse.ok) {
+          const postHtml = await postResponse.text();
+          // Use postback result if it has more players
+          const postbackPlayers = this.parsePlayers(postHtml);
+          if (postbackPlayers.length > players.length) {
+            players = postbackPlayers;
+          }
+          html = postHtml;
+        }
+      }
+      
+      // Try to extract rounds - check for LinkButton2 postback
+      if (players.length > 0) {
+        const roundPostback = await this.tryLoadRounds(initialUrl, html);
+        if (roundPostback.length > 0) {
+          rounds = roundPostback;
+        }
+      }
+      
+      // Fallback: try parsing rounds directly from current HTML
+      if (rounds.length === 0) {
+        rounds = this.parseRoundsFromTable(html);
+      }
+      
+      return { players, rounds };
     } catch (error) {
       console.error(`Failed to scrape tournament ${externalId}:`, error);
       return null;
     }
   }
 
+  /**
+   * Try to load rounds via ASP.NET postback
+   */
+  private async tryLoadRounds(url: string, html: string): Promise<ScrapedRound[]> {
+    try {
+      const viewStateMatch = html.match(/id="__VIEWSTATE" value="([^"]+)"/);
+      const viewStateGenMatch = html.match(/id="__VIEWSTATEGENERATOR" value="([^"]+)"/);
+      const eventValidationMatch = html.match(/id="__EVENTVALIDATION" value="([^"]+)"/);
+      
+      if (!viewStateMatch || !eventValidationMatch) return [];
+      
+      const formData = new URLSearchParams({
+        '__EVENTTARGET': 'ctl00$P1$LinkButton2',
+        '__EVENTARGUMENT': '',
+        '__VIEWSTATE': viewStateMatch[1],
+        '__VIEWSTATEGENERATOR': viewStateGenMatch ? viewStateGenMatch[1] : '',
+        '__EVENTVALIDATION': eventValidationMatch[1],
+      });
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": url,
+        },
+        body: formData.toString(),
+      });
+
+      if (response.ok) {
+        const roundHtml = await response.text();
+        return this.parseRoundsFromTable(roundHtml);
+      }
+    } catch (error) {
+      console.error('Failed to load rounds via postback:', error);
+    }
+    return [];
+  }
+
   private parsePlayers(html: string): ScrapedPlayer[] {
     const players: ScrapedPlayer[] = [];
-    // Chess-Results uses CRg1/CRg2 classes for player rows (not VRg)
-    // Pattern: <tr class="CRg1 MTN"><td class="CRc">rank</td><td class="CR"></td><td class="CR">Name</td>...
-    const rowPattern = /<tr[^>]*class="CRg[12](?:\s+[^"]*)?"[^>]*>([\s\S]*?)<\/tr>/gi;
-    const matches = html.matchAll(rowPattern);
+    
+    // Try multiple patterns for player rows
+    const patterns = [
+      // Pattern 1: CRg1/CRg2 class rows with rank in first cell
+      /<tr[^>]*class="CRg[12][^"]*"[^>]*>([\s\S]*?)<\/tr>/gi,
+      // Pattern 2: Any row with rank number
+      /<tr[^>]*>([\s\S]*?)<td[^>]*class="CRc"[^>]*>(\d+)<\/td>([\s\S]*?)<\/tr>/gi,
+    ];
 
-    for (const match of matches) {
-      const rowHtml = match[1];
-      
-      // Skip header rows
-      if (rowHtml.includes('<th') || rowHtml.includes('No.') || rowHtml.includes('Name')) {
-        continue;
-      }
-      
-      // Extract all <td> cells (must use [\s\S] to capture HTML inside)
-      const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
-      
-      if (cells.length < 4) continue;
-      
-      // Structure: [rank, empty, name, fideId, fed, rating]
-      const rankCell = cells[0]?.[1] || "";
-      const nameCell = cells[2]?.[1] || "";
-      const fideCell = cells[3]?.[1] || "";
-      const ratingCell = cells[5]?.[1] || "";
-      
-      const rank = parseInt(rankCell, 10);
-      const rating = parseInt(ratingCell, 10);
-      const name = nameCell.trim();
-      
-      if (name && !name.match(/^(No\.?|Name|FIDE|Fed|Rtg|Points|Pts)$/i) && rank > 0) {
-        // Extract FIDE ID from anchor tag or plain text
-        const fideMatch = fideCell.match(/profile\/(\d+)/) || fideCell.match(/(\d{6,})/);
+    for (const pattern of patterns) {
+      const matches = html.matchAll(pattern);
+      for (const match of matches) {
+        let rowHtml: string;
+        let rank: number;
+        
+        if (pattern.source.includes('CRc')) {
+          // Pattern 2: rank is in match[2]
+          rank = parseInt(match[2], 10);
+          rowHtml = match[1] + match[3];
+        } else {
+          // Pattern 1: extract rank from first cell
+          rowHtml = match[1];
+          const rankMatch = rowHtml.match(/<td[^>]*class="CRc"[^>]*>([\s\S]*?)<\/td>/i);
+          if (rankMatch) {
+            rank = parseInt(rankMatch[1].replace(/<[^>]*>/g, '').trim(), 10);
+          } else {
+            continue;
+          }
+        }
+        
+        if (isNaN(rank) || rank <= 0) continue;
+        
+        // Skip header rows
+        if (rowHtml.includes('<th') || rowHtml.includes('>No.<') || rowHtml.includes('>Name<')) continue;
+        
+        // Extract player name
+        let name = "";
+        const namePatterns = [
+          /<td[^>]*class="CR"[^>]*>\s*<a[^>]*>([^<]+)<\/a>\s*<\/td>/i,
+          /<td[^>]*class="CR"[^>]*>\s*([^<,]+),\s*([^<]+)\s*<\/td>/i,
+          /<td[^>]*>\s*([^<,]+),\s*([^<]+)\s*<\/td>/i,
+        ];
+        
+        for (const namePattern of namePatterns) {
+          const nameMatch = rowHtml.match(namePattern);
+          if (nameMatch) {
+            name = this.decodeHtmlEntities(nameMatch[1].trim());
+            break;
+          }
+        }
+        
+        if (!name || name.length < 3) continue;
+        
+        // Extract FIDE ID
+        const fideMatch = rowHtml.match(/profile\/(\d+)/) || rowHtml.match(/(\d{6,})/);
+        
+        // Extract rating
+        const ratingMatch = rowHtml.match(/class="CRr"[^>]*>([^<]+)<\/td>/i);
+        let rating: number | undefined;
+        if (ratingMatch) {
+          rating = parseInt(ratingMatch[1], 10);
+          if (isNaN(rating)) rating = undefined;
+        }
+        
+        // Extract points
+        const pointsMatch = rowHtml.match(/class="CRp"[^>]*>([^<]+)<\/td>/i);
+        let points: number | undefined;
+        if (pointsMatch) {
+          points = parseFloat(pointsMatch[1]);
+          if (isNaN(points)) points = undefined;
+        }
+        
         players.push({
-          name: this.decodeHtmlEntities(name),
+          name,
           fideId: fideMatch ? fideMatch[1] : undefined,
           seed: undefined,
-          points: undefined,
-          rank: rank,
+          points,
+          rank,
+          rating,
         });
       }
+      
+      if (players.length > 0) break;
     }
-    return players;
+    
+    // Deduplicate
+    const seen = new Set<string>();
+    return players.filter(p => {
+      const key = `${p.name}|${p.rank}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   private parseRounds(html: string): ScrapedRound[] {
-    const rounds: ScrapedRound[] = [];
-    const roundPattern = /<h[23][^>]*>[\s]*Round\s*(\d+)[\s]*(<[^>]*>.*?<\/[^>]*>)?[\s]*<\/h[23]>/gi;
-    const roundMatches = html.matchAll(roundPattern);
+    return this.parseRoundsFromTable(html);
+  }
 
-    for (const roundMatch of roundMatches) {
-      const roundNumber = parseInt(roundMatch[1], 10);
-      const startIndex = roundMatch.index! + roundMatch[0].length;
-      const nextRoundMatch = Array.from(html.matchAll(roundPattern)).find((m) => m.index! > startIndex);
-      const endIndex = nextRoundMatch ? nextRoundMatch.index! : html.length;
-      const roundHtml = html.slice(startIndex, endIndex);
-      const pairings = this.parsePairings(roundHtml);
-      rounds.push({ number: roundNumber, pairings });
+  private parseRoundsFromTable(html: string): ScrapedRound[] {
+    const rounds: ScrapedRound[] = [];
+    
+    // Look for round headers
+    const roundHeaderPattern = /(?:Round|Runde)[\s]*(\d+)/gi;
+    const headerMatches = [...html.matchAll(roundHeaderPattern)];
+    
+    if (headerMatches.length === 0) {
+      // No explicit headers - check for pairing table structure
+      return this.parsePairingsFromTable(html);
     }
+    
+    for (let i = 0; i < headerMatches.length; i++) {
+      const roundNum = parseInt(headerMatches[i][1], 10);
+      const startIdx = headerMatches[i].index!;
+      const endIdx = i + 1 < headerMatches.length ? headerMatches[i + 1].index! : html.length;
+      const roundSection = html.slice(startIdx, endIdx);
+      
+      const pairings = this.parsePairingsFromTable(roundSection);
+      if (pairings.length > 0) {
+        rounds.push({ number: roundNum, pairings });
+      }
+    }
+    
     return rounds;
   }
 
   private parsePairings(html: string): ScrapedPairing[] {
+    return this.parsePairingsFromTable(html);
+  }
+
+  private parsePairingsFromTable(html: string): ScrapedPairing[] {
     const pairings: ScrapedPairing[] = [];
-    const pairingPattern = /<tr[^>]*>([\s\S]*?)<td[^>]*>(\d+)<\/td>([\s\S]*?)<\/tr>/gi;
-
+    
+    // Swiss-Manager pairing table format: board, white, black, result in alternating cells
+    const pairingPattern = /<tr[^>]*>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<\/tr>/gi;
+    
     for (const match of html.matchAll(pairingPattern)) {
-      const boardNum = parseInt(match[2], 10);
-      const rowHtml = match[1] + match[3];
-      const whiteMatch = rowHtml.match(/<td[^>]*>([^<]+)<\/td>/i);
-      const resultMatch = rowHtml.match(/<(?:b|strong)[^>]*>(1[\-/]2|1|0)<\s*[\-/]\s*(1[\-/]2|1|0|)><\/(?:b|strong)>/i);
-      const blackMatch = rowHtml.match(/<td[^>]*>\s*<a[^>]*>[^<]+<\/a>\s*<\/td>\s*<td[^>]*>([^<]+)<\/td>/i);
-
-      if (whiteMatch) {
+      const board = parseInt(match[1], 10);
+      if (isNaN(board)) continue;
+      
+      const white = this.decodeHtmlEntities(match[2].trim().replace(/<[^>]*>/g, ''));
+      const black = this.decodeHtmlEntities(match[4].trim().replace(/<[^>]*>/g, ''));
+      const result = match[6].trim().replace(/<[^>]*>/g, '');
+      
+      if (white || black) {
         pairings.push({
-          board: boardNum,
-          whitePlayer: this.decodeHtmlEntities(whiteMatch[1].trim()),
-          blackPlayer: blackMatch ? this.decodeHtmlEntities(blackMatch[1].trim()) : undefined,
-          result: resultMatch ? `${resultMatch[1]}-${resultMatch[2]}` : undefined,
+          board,
+          whitePlayer: white || undefined,
+          blackPlayer: black || undefined,
+          result: result || undefined,
         });
       }
     }
+    
     return pairings;
   }
 }
