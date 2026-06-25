@@ -4,8 +4,8 @@ export interface ScrapedTournament {
   externalId: string;
   name: string;
   location: string;
-  startDate: Date;
-  endDate: Date;
+  startDate?: Date;
+  endDate?: Date;
   status: TournamentStatus;
   playerCount: number;
   sourceUrl: string;
@@ -89,20 +89,23 @@ export class TournamentScraper {
         const name = this.decodeHtmlEntities(linkMatch[2].trim());
         const sourceUrl = `https://chess-results.com/${tnrId}.aspx?lan=1`;
 
+        // Status codes: 17=UPCOMING, 18=ACTIVE, 5=FINISHED
         let status: TournamentStatus = "UPCOMING";
         if (statusMatch) {
           const statusCode = statusMatch[1];
           if (statusCode === "18") status = "ACTIVE";
           else if (statusCode === "5") status = "FINISHED";
+          else if (statusCode === "17") status = "UPCOMING";
         }
 
         // Location not available on federation list page - default to Mauritania
         const location = "موريتانيا";
 
+        // Default dates - will be updated when fetching tournament details
         const now = new Date();
-        let startDate = new Date();
-        let endDate = new Date();
-        
+        let startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+        let endDate = now;
+
         if (durationMatch) {
           const daysAgo = parseInt(durationMatch[1], 10);
           startDate = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
@@ -164,6 +167,8 @@ export class TournamentScraper {
   async scrapeTournamentDetails(externalId: string): Promise<{
     players: ScrapedPlayer[];
     rounds: ScrapedRound[];
+    startDate?: Date;
+    endDate?: Date;
   } | null> {
     try {
       const initialUrl = `${this.baseUrl}/tnr${externalId}.aspx?lan=1`;
@@ -182,6 +187,9 @@ export class TournamentScraper {
       }
 
       let html = await initialResponse.text();
+      
+      // Extract dates from the page
+      const dates = this.extractTournamentDates(html);
       
       // Extract VIEWSTATE for postback
       const viewStateMatch = html.match(/id="__VIEWSTATE" value="([^"]+)"/);
@@ -245,7 +253,7 @@ export class TournamentScraper {
         rounds = this.parseRoundsFromTable(html);
       }
       
-      return { players, rounds };
+      return { players, rounds, ...dates };
     } catch (error) {
       console.error(`Failed to scrape tournament ${externalId}:`, error);
       return null;
@@ -421,6 +429,50 @@ export class TournamentScraper {
 
   private parsePairings(html: string): ScrapedPairing[] {
     return this.parsePairingsFromTable(html);
+  }
+
+  /**
+   * Extract tournament start and end dates from the page
+   * Looks for patterns like "from 01.06.2026 to 03.06.2026" or "01.06.2026 - 03.06.2026"
+   */
+  private extractTournamentDates(html: string): { startDate?: Date; endDate?: Date } {
+    // Try to find date range patterns
+    // Pattern 1: "from DD.MM.YYYY to DD.MM.YYYY" or "vom DD.MM.YYYY bis DD.MM.YYYY"
+    const rangeMatch = html.match(/(?:from|vom|from)\s*(\d{1,2}\.\d{1,2}\.\d{4})\s*(?:to|bis|\-)\s*(\d{1,2}\.\d{1,2}\.\d{4})/i);
+    if (rangeMatch) {
+      const start = this.parseGermanDate(rangeMatch[1]);
+      const end = this.parseGermanDate(rangeMatch[2]);
+      return { startDate: start, endDate: end };
+    }
+    
+    // Pattern 2: Look for date spans near "Erstellt" or "Created" or standalone dates
+    // Find all DD.MM.YYYY dates and use first and last
+    const dateMatches = [...html.matchAll(/(\d{1,2}\.\d{1,2}\.\d{4})/g)];
+    if (dateMatches.length >= 2) {
+      // Filter out server time (current date) - usually the most recent
+      const dates = dateMatches
+        .map(m => this.parseGermanDate(m[1]))
+        .filter(d => !isNaN(d.getTime()) && d.getFullYear() > 2020 && d.getFullYear() < 2030);
+      
+      if (dates.length >= 2) {
+        return { 
+          startDate: dates[0], 
+          endDate: dates[dates.length - 1] 
+        };
+      }
+    }
+    
+    // Pattern 3: Single date like "01.06.2026" 
+    const singleDateMatch = html.match(/erstellt|Created|Anfang|Beginn/i);
+    if (singleDateMatch) {
+      const firstDateMatch = html.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
+      if (firstDateMatch) {
+        const date = this.parseGermanDate(firstDateMatch[1]);
+        return { startDate: date, endDate: date };
+      }
+    }
+    
+    return {};
   }
 
   private parsePairingsFromTable(html: string): ScrapedPairing[] {
