@@ -411,15 +411,19 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
             },
             update: {
               seed: scrapedPlayer.seed,
-              points: scrapedPlayer.points || 0,
+              points: scrapedPlayer.points ?? 0,
               rank: scrapedPlayer.rank,
+              tiebreak1: scrapedPlayer.tiebreak1 ?? null,
+              tiebreak2: scrapedPlayer.tiebreak2 ?? null,
             },
             create: {
               tournamentId: tournament.id,
               playerId: player.id,
               seed: scrapedPlayer.seed,
-              points: scrapedPlayer.points || 0,
+              points: scrapedPlayer.points ?? 0,
               rank: scrapedPlayer.rank,
+              tiebreak1: scrapedPlayer.tiebreak1 ?? null,
+              tiebreak2: scrapedPlayer.tiebreak2 ?? null,
             }
           });
           

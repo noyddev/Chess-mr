@@ -19,6 +19,8 @@ export interface ScrapedPlayer {
   points?: number;
   rank?: number;
   rating?: number;
+  tiebreak1?: number; // Buchholz
+  tiebreak2?: number; // SB (Sonneborn-Berger)
 }
 
 export interface ScrapedRound {
@@ -376,12 +378,48 @@ export class TournamentScraper {
           }
         }
         
-        // Extract points from CRp class cell
-        const pointsMatch = rowHtml.match(/class="CRp"[^>]*>([^<]+)<\/td>/i);
+        // Extract points from CRp class cell (handle both "1.5" and "1&#160;1/2" formats)
         let points: number | undefined;
+        const pointsMatch = rowHtml.match(/<td[^>]*class="CRp"[^>]*>([\s\S]*?)<\/td>/i);
         if (pointsMatch) {
-          points = parseFloat(pointsMatch[1]);
-          if (isNaN(points)) points = undefined;
+          const pointsStr = pointsMatch[1].replace(/<[^>]*>/g, '').replace(/&#160;/g, ' ').trim();
+          // Handle fractional points like "1 1/2" or "1½"
+          if (pointsStr.includes('½')) {
+            points = parseFloat(pointsStr.replace('½', '.5')) || undefined;
+          } else if (pointsStr.includes('/')) {
+            const parts = pointsStr.split(' ');
+            let total = 0;
+            for (const part of parts) {
+              if (part.includes('/')) {
+                const [num, den] = part.split('/');
+                total += parseInt(num) / parseInt(den);
+              } else {
+                total += parseFloat(part) || 0;
+              }
+            }
+            points = total > 0 ? total : undefined;
+          } else {
+            points = parseFloat(pointsStr);
+            if (isNaN(points)) points = undefined;
+          }
+        }
+        
+        // Extract Buchholz from CRb class cell
+        let tiebreak1: number | undefined;
+        const buchholzMatch = rowHtml.match(/<td[^>]*class="CRb"[^>]*>([\s\S]*?)<\/td>/i);
+        if (buchholzMatch) {
+          const buchholzStr = buchholzMatch[1].replace(/<[^>]*>/g, '').trim();
+          tiebreak1 = parseFloat(buchholzStr);
+          if (isNaN(tiebreak1)) tiebreak1 = undefined;
+        }
+        
+        // Extract SB (Sonneborn-Berger) from CRs class cell
+        let tiebreak2: number | undefined;
+        const sbMatch = rowHtml.match(/<td[^>]*class="CRs"[^>]*>([\s\S]*?)<\/td>/i);
+        if (sbMatch) {
+          const sbStr = sbMatch[1].replace(/<[^>]*>/g, '').trim();
+          tiebreak2 = parseFloat(sbStr);
+          if (isNaN(tiebreak2)) tiebreak2 = undefined;
         }
         
         players.push({
@@ -389,6 +427,8 @@ export class TournamentScraper {
           fideId: fideMatch ? fideMatch[1] : undefined,
           seed: undefined,
           points,
+          tiebreak1,
+          tiebreak2,
           rank,
           rating,
         });
@@ -489,18 +529,44 @@ export class TournamentScraper {
   private parsePairingsFromTable(html: string): ScrapedPairing[] {
     const pairings: ScrapedPairing[] = [];
     
-    // Swiss-Manager pairing table format: board, white, black, result in alternating cells
-    const pairingPattern = /<tr[^>]*>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<\/tr>/gi;
+    // Swiss-Manager pairing table format: board, white, black, result in 5 <td> cells
+    // Pattern captures: [1]=board, [2]=white, [3]=black, [4]=white_pts, [5]=result
+    const pairingPattern = /<tr[^>]*>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<\/tr>/gi;
     
     for (const match of html.matchAll(pairingPattern)) {
       const board = parseInt(match[1], 10);
       if (isNaN(board)) continue;
       
-      const white = this.decodeHtmlEntities(match[2].trim().replace(/<[^>]*>/g, ''));
-      const black = this.decodeHtmlEntities(match[4].trim().replace(/<[^>]*>/g, ''));
-      const result = match[6].trim().replace(/<[^>]*>/g, '');
+      // Extract text content from each cell (may contain links, formatting)
+      const white = this.decodeHtmlEntities(match[2].replace(/<[^>]*>/g, '').trim());
+      const black = this.decodeHtmlEntities(match[3].replace(/<[^>]*>/g, '').trim());
+      const result = this.decodeHtmlEntities(match[5].replace(/<[^>]*>/g, '').trim());
       
-      if (white || black) {
+      // Skip empty rows or header rows
+      if (!white && !black) continue;
+      if (white.toLowerCase().includes('white') || black.toLowerCase().includes('black')) continue;
+      
+      pairings.push({
+        board,
+        whitePlayer: white || undefined,
+        blackPlayer: black || undefined,
+        result: result || undefined,
+      });
+    }
+    
+    // Fallback: try simpler pattern if no results from main pattern
+    if (pairings.length === 0) {
+      const simplePattern = /<tr[^>]*>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>\s*([\s\S]*?)\s*<\/td>\s*<td[^>]*>\s*([\s\S]*?)\s*<\/td>\s*<td[^>]*>\s*([\s\S]*?)\s*<\/td>\s*<\/tr>/gi;
+      for (const match of html.matchAll(simplePattern)) {
+        const board = parseInt(match[1], 10);
+        if (isNaN(board)) continue;
+        
+        const white = this.decodeHtmlEntities(match[2].replace(/<[^>]*>/g, '').trim());
+        const black = this.decodeHtmlEntities(match[3].replace(/<[^>]*>/g, '').trim());
+        const result = this.decodeHtmlEntities(match[4].replace(/<[^>]*>/g, '').trim());
+        
+        if (!white && !black) continue;
+        
         pairings.push({
           board,
           whitePlayer: white || undefined,
