@@ -460,7 +460,11 @@ export class TournamentScraper {
     
     if (headerMatches.length === 0) {
       // No explicit headers - check for pairing table structure
-      return this.parsePairingsFromTable(html);
+      const pairings = this.parsePairingsFromTable(html);
+      if (pairings.length > 0) {
+        rounds.push({ number: 1, pairings });
+      }
+      return rounds;
     }
     
     for (let i = 0; i < headerMatches.length; i++) {

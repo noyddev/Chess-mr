@@ -17,7 +17,7 @@ import {
   ArrowLeft,
   Activity,
 } from "lucide-react";
-import { formatDateShort, getInitials, getDisplayRating } from "@/lib/utils";
+import { formatDateTime, formatDateShort, getInitials, getDisplayRating } from "@/lib/utils";
 
 interface HomePageData {
   activeTournaments: Array<{
@@ -135,8 +135,7 @@ async function getHomePageData(): Promise<HomePageData> {
         },
       }),
       prisma.player.findMany({
-        orderBy: { fideRating: "desc" },
-        take: 10,
+        take: 50,
         select: {
           id: true,
           name: true,
@@ -169,11 +168,20 @@ async function getHomePageData(): Promise<HomePageData> {
       totalPlayers: stats[1],
     });
 
+    // Sort players by their best rating (FIDE, Rapid, Blitz, or Classical)
+    const sortedPlayers = [...topPlayers].sort((a, b) => {
+      const ratingA =
+        a.fideRating ?? a.lichessRapid ?? a.lichessBlitz ?? a.lichessClassical ?? 0;
+      const ratingB =
+        b.fideRating ?? b.lichessRapid ?? b.lichessBlitz ?? b.lichessClassical ?? 0;
+      return ratingB - ratingA;
+    });
+
     return {
       activeTournaments,
       upcomingTournaments,
       recentTournaments,
-      topPlayers,
+      topPlayers: sortedPlayers.slice(0, 10),
       totalTournaments: stats[0],
       totalPlayers: stats[1],
       lastSync: stats[2]?.completedAt ?? null,
@@ -422,7 +430,7 @@ export default async function HomePage() {
                 {data.lastSync ? (
                   <>
                     <p className="text-sm font-medium">
-                      {formatDateShort(data.lastSync)}
+                      {formatDateTime(data.lastSync)}
                     </p>
                     <p className="text-xs text-muted-foreground">آخر تحديث</p>
                   </>

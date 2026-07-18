@@ -23,6 +23,17 @@ export function formatDateShort(date: Date | string): string {
   });
 }
 
+export function formatDateTime(date: Date | string): string {
+  const d = new Date(date);
+  return d.toLocaleString("ar-MR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function formatDateISO(date: Date | string): string {
   const d = new Date(date);
   return d.toISOString().split("T")[0];

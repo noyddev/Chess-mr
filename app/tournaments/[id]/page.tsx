@@ -23,8 +23,9 @@ import {
   RefreshCw,
   Clock,
 } from "lucide-react";
-import { formatDate, formatDateShort, getInitials, getResultColor } from "@/lib/utils";
+import { formatDate, formatDateTime, formatDateShort, getInitials, getResultColor, getDisplayRating } from "@/lib/utils";
 import { StaleDataAlert, SyncStatusBadge } from "@/components/features/stale-data-alert";
+import { RefreshProvider } from "@/components/features/refresh-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -151,7 +152,7 @@ export default async function TournamentPage({ params }: TournamentPageProps) {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <RefreshCw className="h-4 w-4" />
-                  آخر تحديث: {formatDateShort(tournament.lastSynced)}
+                  آخر تحديث: {formatDateTime(tournament.lastSynced)}
                 </span>
               </div>
             </div>
@@ -164,6 +165,11 @@ export default async function TournamentPage({ params }: TournamentPageProps) {
         <StaleDataAlert
           lastSynced={tournament.lastSynced}
           status={tournament.status}
+        />
+        <RefreshProvider
+          tournamentId={tournament.id}
+          tournamentStatus={tournament.status}
+          lastSynced={tournament.lastSynced}
         />
       </div>
 
@@ -201,53 +207,64 @@ export default async function TournamentPage({ params }: TournamentPageProps) {
                         <TableRow>
                           <TableHead className="w-16">الترتيب</TableHead>
                           <TableHead>اللاعب</TableHead>
+                          <TableHead className="text-center">التقييم</TableHead>
                           <TableHead className="text-center">النقاط</TableHead>
                           <TableHead className="text-center">Buchholz</TableHead>
                           <TableHead className="text-center">SB</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {tournament.players.map((entry) => (
-                          <TableRow key={entry.id}>
-                            <TableCell className="font-medium">
-                              {entry.rank || "-"}
-                            </TableCell>
-                            <TableCell>
-                              <Link
-                                href={`/players/${entry.player.id}`}
-                                className="flex items-center gap-3 hover:text-primary transition-colors"
-                              >
-                                <Avatar className="h-8 w-8">
-                                  <AvatarFallback className="bg-primary/10 text-xs">
-                                    {getInitials(entry.player.name)}
-                                  </AvatarFallback>
-                                </Avatar>
-                                <div>
-                                  <div className="font-medium flex items-center gap-2">
-                                    {entry.player.name}
-                                    {entry.player.lichessTitle && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {entry.player.lichessTitle}
-                                      </Badge>
-                                    )}
+                        {tournament.players.map((entry) => {
+                          const rating = getDisplayRating(entry.player);
+                          return (
+                            <TableRow key={entry.id}>
+                              <TableCell className="font-medium">
+                                {entry.rank || "-"}
+                              </TableCell>
+                              <TableCell>
+                                <Link
+                                  href={`/players/${entry.player.id}`}
+                                  className="flex items-center gap-3 hover:text-primary transition-colors"
+                                >
+                                  <Avatar className="h-8 w-8">
+                                    <AvatarFallback className="bg-primary/10 text-xs">
+                                      {getInitials(entry.player.name)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div>
+                                    <div className="font-medium flex items-center gap-2">
+                                      {entry.player.name}
+                                      {entry.player.lichessTitle && (
+                                        <Badge variant="outline" className="text-xs">
+                                          {entry.player.lichessTitle}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {entry.player.federation}
+                                    </div>
                                   </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {entry.player.federation}
-                                  </div>
-                                </div>
-                              </Link>
-                            </TableCell>
-                            <TableCell className="text-center font-semibold">
-                              {entry.points.toFixed(1)}
-                            </TableCell>
-                            <TableCell className="text-center text-muted-foreground">
-                              {entry.tiebreak1?.toFixed(1) || "-"}
-                            </TableCell>
-                            <TableCell className="text-center text-muted-foreground">
-                              {entry.tiebreak2?.toFixed(1) || "-"}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                                </Link>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {rating ? (
+                                  <span className="font-semibold text-primary">{rating}</span>
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center font-semibold">
+                                {entry.points.toFixed(1)}
+                              </TableCell>
+                              <TableCell className="text-center text-muted-foreground">
+                                {entry.tiebreak1?.toFixed(1) || "-"}
+                              </TableCell>
+                              <TableCell className="text-center text-muted-foreground">
+                                {entry.tiebreak2?.toFixed(1) || "-"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </CardContent>
@@ -278,73 +295,99 @@ export default async function TournamentPage({ params }: TournamentPageProps) {
                   <CardContent>
                     {latestRound.pairings.length > 0 ? (
                       <div className="space-y-3">
-                        {latestRound.pairings.map((pairing) => (
-                          <div
-                            key={pairing.id}
-                            className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
-                          >
-                            <div className="flex items-center gap-4 flex-1">
-                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-medium">
-                                {pairing.board || "-"}
-                              </span>
-                              <div className="flex items-center gap-2 flex-1">
-                                {pairing.whitePlayer ? (
-                                  <Link
-                                    href={`/players/${pairing.whitePlayer.id}`}
-                                    className="flex items-center gap-2 hover:text-primary"
-                                  >
-                                    <Avatar className="h-8 w-8">
-                                      <AvatarFallback className="bg-primary/10 text-xs">
-                                        {getInitials(pairing.whitePlayer.name)}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <span className="font-medium">
-                                      {pairing.whitePlayer.name}
-                                    </span>
-                                    {pairing.whitePlayer.lichessTitle && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {pairing.whitePlayer.lichessTitle}
-                                      </Badge>
-                                    )}
-                                  </Link>
-                                ) : (
-                                  <span className="text-muted-foreground">-</span>
-                                )}
+                        {latestRound.pairings.map((pairing) => {
+                          const whiteRating = pairing.whitePlayer 
+                            ? (pairing.whitePlayer.fideRating || pairing.whitePlayer.lichessRapid)
+                            : null;
+                          const blackRating = pairing.blackPlayer 
+                            ? (pairing.blackPlayer.fideRating || pairing.blackPlayer.lichessRapid)
+                            : null;
+                          return (
+                            <div
+                              key={pairing.id}
+                              className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
+                            >
+                              <div className="flex items-center gap-4 flex-1">
+                                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-medium">
+                                  {pairing.board || "-"}
+                                </span>
+                                <div className="flex items-center gap-2 flex-1">
+                                  {pairing.whitePlayer ? (
+                                    <Link
+                                      href={`/players/${pairing.whitePlayer.id}`}
+                                      className="flex items-center gap-2 hover:text-primary"
+                                    >
+                                      <Avatar className="h-8 w-8">
+                                        <AvatarFallback className="bg-primary/10 text-xs">
+                                          {getInitials(pairing.whitePlayer.name)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium">
+                                            {pairing.whitePlayer.name}
+                                          </span>
+                                          {pairing.whitePlayer.lichessTitle && (
+                                            <Badge variant="outline" className="text-xs">
+                                              {pairing.whitePlayer.lichessTitle}
+                                            </Badge>
+                                          )}
+                                        </div>
+                                        {whiteRating && (
+                                          <span className="text-xs text-muted-foreground">
+                                            التقييم: {whiteRating}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </Link>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <span
+                                  className={`text-lg font-bold ${getResultColor(pairing.result)}`}
+                                >
+                                  {pairing.result || "vs"}
+                                </span>
+                                <div className="flex items-center gap-2 flex-1">
+                                  {pairing.blackPlayer ? (
+                                    <Link
+                                      href={`/players/${pairing.blackPlayer.id}`}
+                                      className="flex items-center gap-2 hover:text-primary"
+                                    >
+                                      <div className="flex flex-col items-end">
+                                        <div className="flex items-center gap-2">
+                                          {pairing.blackPlayer.lichessTitle && (
+                                            <Badge variant="outline" className="text-xs">
+                                              {pairing.blackPlayer.lichessTitle}
+                                            </Badge>
+                                          )}
+                                          <span className="font-medium">
+                                            {pairing.blackPlayer.name}
+                                          </span>
+                                        </div>
+                                        {blackRating && (
+                                          <span className="text-xs text-muted-foreground">
+                                            التقييم: {blackRating}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <Avatar className="h-8 w-8">
+                                        <AvatarFallback className="bg-primary/10 text-xs">
+                                          {getInitials(pairing.blackPlayer.name)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    </Link>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-4">
-                              <span
-                                className={`text-lg font-bold ${getResultColor(pairing.result)}`}
-                              >
-                                {pairing.result || "vs"}
-                              </span>
-                              <div className="flex items-center gap-2 flex-1">
-                                {pairing.blackPlayer ? (
-                                  <Link
-                                    href={`/players/${pairing.blackPlayer.id}`}
-                                    className="flex items-center gap-2 hover:text-primary"
-                                  >
-                                    <span className="font-medium">
-                                      {pairing.blackPlayer.name}
-                                    </span>
-                                    {pairing.blackPlayer.lichessTitle && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {pairing.blackPlayer.lichessTitle}
-                                      </Badge>
-                                    )}
-                                    <Avatar className="h-8 w-8">
-                                      <AvatarFallback className="bg-primary/10 text-xs">
-                                        {getInitials(pairing.blackPlayer.name)}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                  </Link>
-                                ) : (
-                                  <span className="text-muted-foreground">-</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="text-center text-muted-foreground py-8">
@@ -507,7 +550,7 @@ export default async function TournamentPage({ params }: TournamentPageProps) {
                     </div>
                     <div>
                       <label className="text-sm text-muted-foreground">آخر تحديث</label>
-                      <p className="font-medium">{formatDateShort(tournament.lastSynced)}</p>
+                      <p className="font-medium">{formatDateTime(tournament.lastSynced)}</p>
                     </div>
                   </div>
                 </CardContent>
