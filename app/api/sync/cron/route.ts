@@ -9,7 +9,8 @@ export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization");
   const expectedSecret = process.env.CRON_SECRET;
 
-  if (expectedSecret && authHeader !== `Bearer ${expectedSecret}`) {
+  // Only enforce auth if CRON_SECRET is explicitly configured (non-empty string)
+  if (expectedSecret && expectedSecret.length > 0 && authHeader !== `Bearer ${expectedSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

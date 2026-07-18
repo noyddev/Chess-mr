@@ -136,6 +136,12 @@ async function getHomePageData(): Promise<HomePageData> {
       }),
       prisma.player.findMany({
         take: 50,
+        orderBy: [
+          { fideRating: "desc" },
+          { lichessRapid: "desc" },
+          { lichessBlitz: "desc" },
+          { lichessClassical: "desc" },
+        ],
         select: {
           id: true,
           name: true,
@@ -168,20 +174,13 @@ async function getHomePageData(): Promise<HomePageData> {
       totalPlayers: stats[1],
     });
 
-    // Sort players by their best rating (FIDE, Rapid, Blitz, or Classical)
-    const sortedPlayers = [...topPlayers].sort((a, b) => {
-      const ratingA =
-        a.fideRating ?? a.lichessRapid ?? a.lichessBlitz ?? a.lichessClassical ?? 0;
-      const ratingB =
-        b.fideRating ?? b.lichessRapid ?? b.lichessBlitz ?? b.lichessClassical ?? 0;
-      return ratingB - ratingA;
-    });
-
+    // Players are already sorted by best available rating at DB level
+    // (FIDE first, then lichessRapid, lichessBlitz, lichessClassical)
     return {
       activeTournaments,
       upcomingTournaments,
       recentTournaments,
-      topPlayers: sortedPlayers.slice(0, 10),
+      topPlayers: topPlayers.slice(0, 10),
       totalTournaments: stats[0],
       totalPlayers: stats[1],
       lastSync: stats[2]?.completedAt ?? null,

@@ -12,10 +12,10 @@
   },
   "cron": [
     {
-      "name": "sync",
+      "name": "sync-tournaments",
       "command": "curl -X POST https://chess-mr.up.railway.app/api/sync/cron",
-      "schedule": "0 */6 * * *",
-      "description": "Sync tournaments and players every 6 hours"
+      "schedule": "*/5 * * * *",
+      "description": "Sync tournaments and players every 5 minutes for active tournament updates"
     }
   ]
 }

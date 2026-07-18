@@ -271,7 +271,10 @@ export class TournamentScraper {
       const viewStateGenMatch = html.match(/id="__VIEWSTATEGENERATOR" value="([^"]+)"/);
       const eventValidationMatch = html.match(/id="__EVENTVALIDATION" value="([^"]+)"/);
       
-      if (!viewStateMatch || !eventValidationMatch) return [];
+      if (!viewStateMatch || !eventValidationMatch) {
+        console.log('[SCRAPER] Missing VIEWSTATE or EVENTVALIDATION for rounds postback');
+        return [];
+      }
       
       const formData = new URLSearchParams({
         '__EVENTTARGET': 'ctl00$P1$LinkButton2',
@@ -293,7 +296,11 @@ export class TournamentScraper {
 
       if (response.ok) {
         const roundHtml = await response.text();
-        return this.parseRoundsFromTable(roundHtml);
+        const rounds = this.parseRoundsFromTable(roundHtml);
+        console.log(`[SCRAPER] Loaded ${rounds.length} rounds via postback`);
+        return rounds;
+      } else {
+        console.log(`[SCRAPER] Rounds postback failed with status ${response.status}`);
       }
     } catch (error) {
       console.error('Failed to load rounds via postback:', error);
@@ -422,6 +429,18 @@ export class TournamentScraper {
           if (isNaN(tiebreak2)) tiebreak2 = undefined;
         }
         
+        // Debug logging for players with missing data
+        if (name && (points === undefined || tiebreak1 === undefined || tiebreak2 === undefined)) {
+          console.log(`[SCRAPER_DEBUG] Player "${name}" has missing data:`, {
+            points: points === undefined ? 'MISSING' : points,
+            tiebreak1: tiebreak1 === undefined ? 'MISSING' : tiebreak1,
+            tiebreak2: tiebreak2 === undefined ? 'MISSING' : tiebreak2,
+            rawPointsMatch: pointsMatch ? pointsMatch[1].substring(0, 50) : null,
+            rawBuchholzMatch: buchholzMatch ? buchholzMatch[1].substring(0, 50) : null,
+            rawSbMatch: sbMatch ? sbMatch[1].substring(0, 50) : null,
+          });
+        }
+        
         players.push({
           name,
           fideId: fideMatch ? fideMatch[1] : undefined,
@@ -455,14 +474,19 @@ export class TournamentScraper {
     const rounds: ScrapedRound[] = [];
     
     // Look for round headers
-    const roundHeaderPattern = /(?:Round|Runde)[\s]*(\d+)/gi;
+    const roundHeaderPattern = /(?:Round|Runde|Runde[\s]+[\d]+|Rd\.?\s*\d+)[\s:.]*(\d+)/gi;
     const headerMatches = [...html.matchAll(roundHeaderPattern)];
+    
+    console.log(`[SCRAPER] Found ${headerMatches.length} round headers in HTML`);
     
     if (headerMatches.length === 0) {
       // No explicit headers - check for pairing table structure
       const pairings = this.parsePairingsFromTable(html);
       if (pairings.length > 0) {
+        console.log(`[SCRAPER] No round headers, found ${pairings.length} pairings in initial table`);
         rounds.push({ number: 1, pairings });
+      } else {
+        console.log(`[SCRAPER] No round headers and no pairings found`);
       }
       return rounds;
     }
