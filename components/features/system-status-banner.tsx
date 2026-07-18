@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { formatDateTime } from "@/lib/utils";
 
 interface SystemStatusBannerProps {
   status: "ok" | "degraded" | "error";
@@ -84,12 +85,7 @@ interface DataStatusBadgeProps {
 export function DataStatusBadge({ lastUpdated, status }: DataStatusBadgeProps) {
   const formatTime = (date: Date | null) => {
     if (!date) return "غير متوفر";
-    return date.toLocaleString("ar-MR", {
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return formatDateTime(date);
   };
 
   return (
