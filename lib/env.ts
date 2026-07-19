@@ -21,6 +21,7 @@ const OPTIONAL_VARS = [
   "NEXT_PUBLIC_API_URL",
   "LICHESS_TOKEN",
   "NODE_ENV",
+  "CRON_SECRET",
 ] as const;
 
 const URL_VARS = [

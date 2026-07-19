@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Activity, RefreshCw } from "lucide-react";
 
 interface RefreshProviderProps {
@@ -15,41 +15,39 @@ export function RefreshProvider({
   tournamentStatus,
   lastSynced,
 }: RefreshProviderProps) {
-  const router = useRouter();
-  const [lastUpdated, setLastUpdated] = useState(lastSynced);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [timeUntilRefresh, setTimeUntilRefresh] = useState(30);
-
+  const queryClient = useQueryClient();
   const isActive = tournamentStatus === "ACTIVE";
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [timeSinceUpdate, setTimeSinceUpdate] = useState(0);
 
+  // Track time since last update
+  useEffect(() => {
+    const updateTime = () => {
+      const seconds = Math.floor((Date.now() - lastSynced.getTime()) / 1000);
+      setTimeSinceUpdate(seconds);
+    };
+    
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, [lastSynced]);
+
+  // Force a refresh periodically for active tournaments
   useEffect(() => {
     if (!isActive) return;
 
     const interval = setInterval(() => {
-      setTimeUntilRefresh((prev) => {
-        if (prev <= 1) {
-          // Time to refresh
-          setIsRefreshing(true);
-          router.refresh();
-          return 30;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+      setIsRefreshing(true);
+      // Invalidate tournament-related queries to trigger a refetch
+      queryClient.invalidateQueries({ queryKey: ["tournament", tournamentId] });
+      setTimeout(() => {
+        setIsRefreshing(false);
+        setTimeSinceUpdate(0);
+      }, 2000);
+    }, 30000); // Every 30 seconds
 
     return () => clearInterval(interval);
-  }, [isActive, router]);
-
-  useEffect(() => {
-    if (isRefreshing) {
-      // Wait for router.refresh to complete
-      const timeout = setTimeout(() => {
-        setIsRefreshing(false);
-        setLastUpdated(new Date());
-      }, 2000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isRefreshing]);
+  }, [isActive, tournamentId, queryClient]);
 
   if (!isActive) return null;
 
@@ -72,7 +70,7 @@ export function RefreshProvider({
             جاري التحديث...
           </span>
         ) : (
-          <span>التحديث التالي خلال {timeUntilRefresh} ثانية</span>
+          <span>آخر تحديث: منذ {timeSinceUpdate} ثانية</span>
         )}
       </div>
     </div>

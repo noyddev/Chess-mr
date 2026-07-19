@@ -134,7 +134,17 @@ async function getHomePageData(): Promise<HomePageData> {
           playerCount: true,
         },
       }),
+      // Only show players who have at least one rating (FIDE or Lichess)
+      // This prevents NULL values from appearing at the top
       prisma.player.findMany({
+        where: {
+          OR: [
+            { fideRating: { not: null } },
+            { lichessRapid: { not: null } },
+            { lichessBlitz: { not: null } },
+            { lichessClassical: { not: null } },
+          ],
+        },
         take: 50,
         orderBy: [
           { fideRating: "desc" },

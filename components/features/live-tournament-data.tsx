@@ -1,52 +1,33 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 interface UsePollingOptions<T> {
-  fetchFn: () => Promise<T>;
+  queryKey: string[];
+  queryFn: () => Promise<T>;
   interval: number; // in milliseconds
   enabled?: boolean;
 }
 
-export function usePolling<T>({
-  fetchFn,
+/**
+ * Hook for polling data with automatic stop for finished tournaments
+ * Uses React Query under the hood for proper caching and state management
+ */
+export function useTournamentData<T>({
+  queryKey,
+  queryFn,
   interval,
   enabled = true,
 }: UsePollingOptions<T>) {
-  const [data, setData] = useState<T | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  const fetchData = useCallback(async () => {
-    if (!enabled) return;
-    
-    setIsLoading(true);
-    try {
-      const result = await fetchFn();
-      setData(result);
-      setLastUpdated(new Date());
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error("Unknown error"));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fetchFn, enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    // Initial fetch
-    fetchData();
-
-    // Set up polling interval
-    const intervalId = setInterval(fetchData, interval);
-
-    return () => clearInterval(intervalId);
-  }, [fetchData, interval, enabled]);
-
-  return { data, isLoading, error, lastUpdated, refetch: fetchData };
+  return useQuery({
+    queryKey,
+    queryFn,
+    refetchInterval: enabled ? interval : false, // Stop polling when disabled
+    refetchIntervalInBackground: false, // Don't refetch when window loses focus
+    staleTime: 1000, // Consider data stale after 1 second for active tournaments
+    gcTime: 5 * 60 * 1000, // Keep unused data for 5 minutes
+    retry: 1,
+  });
 }
 
 interface LiveIndicatorProps {

@@ -2,16 +2,34 @@ import { NextResponse } from "next/server";
 import { runFullSync, syncTournamentDetails } from "@/services/sync/orchestrator";
 import prisma from "@/lib/db";
 
-// Cron endpoint - called by Railway scheduled task or external cron service
-// Protected by CRON_SECRET to prevent unauthorized triggers
-export async function POST(request: Request) {
-  // Verify cron secret (set in Railway environment)
-  const authHeader = request.headers.get("authorization");
-  const expectedSecret = process.env.CRON_SECRET;
+// CRON_SECRET must be set in Railway environment variables
+// This is a security requirement to prevent unauthorized cron triggers
+const CRON_SECRET = process.env.CRON_SECRET;
 
-  // Only enforce auth if CRON_SECRET is explicitly configured (non-empty string)
-  if (expectedSecret && expectedSecret.length > 0 && authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+function unauthorizedResponse(message: string) {
+  return NextResponse.json(
+    { error: "Unauthorized", message },
+    { status: 401 }
+  );
+}
+
+// Cron endpoint - called by Railway scheduled task or external cron service
+// MUST be protected by CRON_SECRET - requests without valid secret are rejected
+export async function POST(request: Request) {
+  // CRON_SECRET is required - reject if not configured
+  if (!CRON_SECRET) {
+    console.error("[CRON] SECURITY ERROR: CRON_SECRET is not configured!");
+    return NextResponse.json(
+      { error: "Server configuration error", message: "Cron secret not configured" },
+      { status: 500 }
+    );
+  }
+
+  // Verify cron secret from Authorization header
+  const authHeader = request.headers.get("authorization");
+  if (authHeader !== `Bearer ${CRON_SECRET}`) {
+    console.warn("[CRON] Unauthorized access attempt from IP:", request.headers.get("x-forwarded-for") || "unknown");
+    return unauthorizedResponse("Invalid or missing cron secret");
   }
 
   try {
@@ -61,11 +79,11 @@ export async function POST(request: Request) {
   }
 }
 
-// Health check for cron monitoring
+// Health check for cron monitoring - no auth required
 export async function GET() {
   return NextResponse.json({
     status: "ok",
-    cronSecretConfigured: !!process.env.CRON_SECRET,
+    cronSecretConfigured: !!CRON_SECRET,
     timestamp: new Date().toISOString(),
   });
 }

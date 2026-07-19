@@ -2,12 +2,24 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { withRetry } from "@/lib/database";
 import { successResponse, errorResponse } from "@/lib/api/response";
+import { checkRateLimit, getClientIP, getRateLimitHeaders } from "@/lib/rate-limit";
 import type { TournamentDetails } from "@/lib/api/types";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const clientIP = getClientIP(request);
+  
+  // Rate limit: 60 requests per minute per IP
+  const rateLimit = checkRateLimit(clientIP, { windowMs: 60000, maxRequests: 60 });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      errorResponse("تم تجاوز الحد الأقصى للطلبات", null),
+      { status: 429, headers: getRateLimitHeaders(rateLimit) }
+    );
+  }
+
   try {
     const { id } = await params;
 
@@ -62,6 +74,7 @@ export async function GET(
                 select: {
                   id: true,
                   board: true,
+                  isBye: true,
                   result: true,
                   whitePlayer: {
                     select: {
@@ -94,18 +107,19 @@ export async function GET(
     if (!tournament) {
       return NextResponse.json(
         errorResponse("البطولة غير موجودة", null),
-        { status: 404 }
+        { status: 404, headers: getRateLimitHeaders(rateLimit) }
       );
     }
 
     return NextResponse.json(
-      successResponse(tournament, tournament.lastSynced)
+      successResponse(tournament, tournament.lastSynced),
+      { headers: getRateLimitHeaders(rateLimit) }
     );
   } catch (error) {
     console.error("Tournament fetch error:", error);
     return NextResponse.json(
       errorResponse("فشل في الاتصال بقاعدة البيانات", null),
-      { status: 503 }
+      { status: 503, headers: getRateLimitHeaders(rateLimit) }
     );
   }
 }

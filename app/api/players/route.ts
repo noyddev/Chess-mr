@@ -2,13 +2,25 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { withRetry, getLastSyncTime } from "@/lib/database";
 import { successResponse, errorResponse } from "@/lib/api/response";
+import { checkRateLimit, getClientIP, getRateLimitHeaders } from "@/lib/rate-limit";
 import type { PlayerListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
+  const clientIP = getClientIP(request);
+  
+  // Rate limit: 60 requests per minute per IP
+  const rateLimit = checkRateLimit(clientIP, { windowMs: 60000, maxRequests: 60 });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      errorResponse("تم تجاوز الحد الأقصى للطلبات", null),
+      { status: 429, headers: getRateLimitHeaders(rateLimit) }
+    );
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
-    const limit = parseInt(searchParams.get("limit") || "30");
+    const limit = Math.min(parseInt(searchParams.get("limit") || "30"), 100);
     const search = searchParams.get("search") || "";
     const sort = searchParams.get("sort") || "name";
 
@@ -20,6 +32,18 @@ export async function GET(request: Request) {
         contains: search,
         mode: "insensitive",
       };
+    }
+
+    // Only show players who have at least one rating when sorting by rating
+    // This prevents players without ratings from appearing at the top
+    const hasRatingFilter = sort === "rating" || sort === "lichessRapid";
+    if (hasRatingFilter) {
+      where.OR = [
+        { fideRating: { not: null } },
+        { lichessRapid: { not: null } },
+        { lichessBlitz: { not: null } },
+        { lichessClassical: { not: null } },
+      ];
     }
 
     const orderBy: Record<string, string>[] = [];
@@ -69,12 +93,14 @@ export async function GET(request: Request) {
       },
     };
 
-    return NextResponse.json(successResponse(response, lastSync));
+    return NextResponse.json(successResponse(response, lastSync), {
+      headers: getRateLimitHeaders(rateLimit)
+    });
   } catch (error) {
     console.error("Players fetch error:", error);
     return NextResponse.json(
       errorResponse("فشل في الاتصال بقاعدة البيانات", null),
-      { status: 503 }
+      { status: 503, headers: getRateLimitHeaders(rateLimit) }
     );
   }
 }
