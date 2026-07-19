@@ -479,13 +479,14 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
             const blackPlayerId = scrapedPairing.blackPlayer 
               ? playerNameToId.get(scrapedPairing.blackPlayer.toLowerCase())
               : null;
+            const board = scrapedPairing.board;
 
-            if (whitePlayerId || blackPlayerId || scrapedPairing.board) {
+            if ((whitePlayerId || blackPlayerId || board) && board !== undefined) {
               await prisma.pairing.upsert({
                 where: {
                   roundId_board: {
                     roundId: round.id,
-                    board: scrapedPairing.board,
+                    board: board,
                   }
                 },
                 update: {
@@ -495,7 +496,7 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
                 },
                 create: {
                   roundId: round.id,
-                  board: scrapedPairing.board,
+                  board: board,
                   whitePlayerId,
                   blackPlayerId,
                   result: scrapedPairing.result,
