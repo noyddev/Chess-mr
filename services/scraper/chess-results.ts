@@ -173,7 +173,8 @@ export class TournamentScraper {
     endDate?: Date;
   } | null> {
     try {
-      const initialUrl = `${this.baseUrl}/tnr${externalId}.aspx?lan=1`;
+      // Use art=1 which shows full standings with points and tiebreaks
+      const initialUrl = `${this.baseUrl}/tnr${externalId}.aspx?lan=1&art=1`;
 
       // First, get the initial page and extract VIEWSTATE
       const initialResponse = await fetch(initialUrl, {
@@ -201,7 +202,7 @@ export class TournamentScraper {
       // Check if we need to click "Show tournament details" for older tournaments
       let needsPostback = html.includes('cb_alleDetails') || html.includes('Show tournament details');
       
-      // First parse players from initial page
+      // First parse players from initial page (with art=1, we get full standings)
       let players = this.parsePlayers(html);
       let rounds: ScrapedRound[] = [];
       
@@ -345,100 +346,81 @@ export class TournamentScraper {
         // Skip header rows
         if (rowHtml.includes('<th') || rowHtml.includes('>No.<') || rowHtml.includes('>Name<')) continue;
         
-        // Extract player name - multiple patterns to catch different HTML formats
-        let name = "";
-        const namePatterns = [
-          // Standard: <td class="CR">LastName, FirstName</td>
-          /<td[^>]*class="CR"[^>]*>\s*([^<,]+),\s*([^<]+)\s*<\/td>/i,
-          // With link: <td class="CR"><a>Name</a></td>
-          /<td[^>]*class="CR"[^>]*>\s*<a[^>]*>([^<]+)<\/a>\s*<\/td>/i,
-          // Generic td: <td>LastName, FirstName</td>
-          /<td[^>]*>\s*([^<,]+),\s*([^<]+)\s*<\/td>/i,
-        ];
+        // Extract all td cells in order to parse by column position
+        // Table structure for art=1:
+        // 0: Rk (rank)
+        // 1: SNo (seed)
+        // 2: Title (optional)
+        // 3: Name
+        // 4: FED
+        // 5: Rating (CRr class)
+        // 6: Pts (points)
+        // 7: TB1 (Buchholz)
+        // 8: TB2 (SB)
+        const cellMatches = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
         
-        for (const namePattern of namePatterns) {
-          const nameMatch = rowHtml.match(namePattern);
-          if (nameMatch && nameMatch[1]) {
-            // Handle both "LastName, FirstName" and "<a>LastName, FirstName</a>" formats
-            const lastName = nameMatch[1].replace(/<[^>]*>/g, '').trim();
-            const firstName = nameMatch[2] ? nameMatch[2].replace(/<[^>]*>/g, '').trim() : '';
-            name = `${lastName}, ${firstName}`;
-            name = this.decodeHtmlEntities(name);
-            break;
-          }
-        }
+        if (cellMatches.length < 6) continue;
+        
+        // Extract player name from column 3 (Name column)
+        const nameCell = cellMatches[3]?.[1] || '';
+        let name = nameCell.replace(/<[^>]*>/g, '').trim();
+        name = this.decodeHtmlEntities(name);
         
         if (!name || name.length < 3) continue;
         if (seenNames.has(name.toLowerCase())) continue;
         seenNames.add(name.toLowerCase());
         
-        // Extract FIDE ID
-        const fideMatch = rowHtml.match(/fide\.com\/profile\/(\d+)/);
+        // Extract FIDE ID from column 4 if it contains a link
+        const fideCell = cellMatches[4]?.[1] || '';
+        const fideMatch = fideCell.match(/fide\.com\/profile\/(\d+)/) || fideCell.match(/(\d{6,})/);
         
-        // Extract rating from CRr class cell (rating column)
-        const ratingMatch = rowHtml.match(/class="CRr"[^>]*>([^<]+)<\/td>/i);
+        // Extract rating from column 5 (CRr class)
+        const ratingCell = cellMatches[5]?.[1] || '';
+        const ratingMatch = ratingCell.match(/(\d{3,4})/);
         let rating: number | undefined;
         if (ratingMatch) {
-          const maybeRating = parseInt(ratingMatch[1].trim(), 10);
+          const maybeRating = parseInt(ratingMatch[1], 10);
           if (!isNaN(maybeRating) && maybeRating > 0) {
             rating = maybeRating;
           }
         }
         
-        // Extract points from CRp class cell (handle both "1.5" and "1&#160;1/2" formats)
+        // Extract points from column 6
+        const pointsCell = cellMatches[6]?.[1] || '';
+        const pointsClean = pointsCell.replace(/<[^>]*>/g, '').replace(/,/g, '.').replace(/½/g, '.5').trim();
         let points: number | undefined;
-        const pointsMatch = rowHtml.match(/<td[^>]*class="CRp"[^>]*>([\s\S]*?)<\/td>/i);
-        if (pointsMatch) {
-          const pointsStr = pointsMatch[1].replace(/<[^>]*>/g, '').replace(/&#160;/g, ' ').trim();
-          // Handle fractional points like "1 1/2" or "1½"
-          if (pointsStr.includes('½')) {
-            points = parseFloat(pointsStr.replace('½', '.5')) || undefined;
-          } else if (pointsStr.includes('/')) {
-            const parts = pointsStr.split(' ');
-            let total = 0;
-            for (const part of parts) {
-              if (part.includes('/')) {
-                const [num, den] = part.split('/');
-                total += parseInt(num) / parseInt(den);
-              } else {
-                total += parseFloat(part) || 0;
-              }
-            }
-            points = total > 0 ? total : undefined;
-          } else {
-            points = parseFloat(pointsStr);
-            if (isNaN(points)) points = undefined;
+        if (pointsClean && pointsClean !== '-' && pointsClean !== '') {
+          const parsed = parseFloat(pointsClean);
+          if (!isNaN(parsed)) {
+            points = parsed;
           }
         }
         
-        // Extract Buchholz from CRb class cell
+        // Extract Buchholz from column 7
+        const tb1Cell = cellMatches[7]?.[1] || '';
+        const tb1Clean = tb1Cell.replace(/<[^>]*>/g, '').trim();
         let tiebreak1: number | undefined;
-        const buchholzMatch = rowHtml.match(/<td[^>]*class="CRb"[^>]*>([\s\S]*?)<\/td>/i);
-        if (buchholzMatch) {
-          const buchholzStr = buchholzMatch[1].replace(/<[^>]*>/g, '').trim();
-          tiebreak1 = parseFloat(buchholzStr);
-          if (isNaN(tiebreak1)) tiebreak1 = undefined;
+        if (tb1Clean && tb1Clean !== '-' && tb1Clean !== '') {
+          const parsed = parseFloat(tb1Clean);
+          if (!isNaN(parsed)) {
+            tiebreak1 = parsed;
+          }
         }
         
-        // Extract SB (Sonneborn-Berger) from CRs class cell
+        // Extract SB from column 8
+        const tb2Cell = cellMatches[8]?.[1] || '';
+        const tb2Clean = tb2Cell.replace(/<[^>]*>/g, '').trim();
         let tiebreak2: number | undefined;
-        const sbMatch = rowHtml.match(/<td[^>]*class="CRs"[^>]*>([\s\S]*?)<\/td>/i);
-        if (sbMatch) {
-          const sbStr = sbMatch[1].replace(/<[^>]*>/g, '').trim();
-          tiebreak2 = parseFloat(sbStr);
-          if (isNaN(tiebreak2)) tiebreak2 = undefined;
+        if (tb2Clean && tb2Clean !== '-' && tb2Clean !== '') {
+          const parsed = parseFloat(tb2Clean);
+          if (!isNaN(parsed)) {
+            tiebreak2 = parsed;
+          }
         }
         
-        // Debug logging for players with missing data
-        if (name && (points === undefined || tiebreak1 === undefined || tiebreak2 === undefined)) {
-          console.log(`[SCRAPER_DEBUG] Player "${name}" has missing data:`, {
-            points: points === undefined ? 'MISSING' : points,
-            tiebreak1: tiebreak1 === undefined ? 'MISSING' : tiebreak1,
-            tiebreak2: tiebreak2 === undefined ? 'MISSING' : tiebreak2,
-            rawPointsMatch: pointsMatch ? pointsMatch[1].substring(0, 50) : null,
-            rawBuchholzMatch: buchholzMatch ? buchholzMatch[1].substring(0, 50) : null,
-            rawSbMatch: sbMatch ? sbMatch[1].substring(0, 50) : null,
-          });
+        // Debug: log players with missing tiebreaks
+        if (name && tiebreak1 === undefined && tiebreak2 === undefined && points !== undefined) {
+          console.log(`[SCRAPER_DEBUG] Player "${name}" - points: ${points}, cols: ${cellMatches.length}`);
         }
         
         players.push({
