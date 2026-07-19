@@ -1,6 +1,8 @@
 import prisma from "@/lib/db";
 import { lichessClient } from "@/services/lichess/client";
 import { tournamentScraper } from "@/services/scraper/chess-results";
+// Import new scraper functions when ready to migrate
+// import { chessResultsScraper } from "@/services/scraper/chess-results-v2";
 import { syncMauritanianLichessPlayers } from "./syncMauritania";
 
 export interface SyncResult {
@@ -569,11 +571,15 @@ export async function getSyncStatus() {
 
 /**
  * Sync details for all tournaments (players, standings, rounds)
+ * Respects sync intervals based on tournament status:
+ * - Active tournaments: Every 5 minutes
+ * - Finished tournaments: Every 24 hours
  */
 export async function syncAllTournamentDetails(): Promise<{
   success: boolean;
   itemsSynced: number;
   failed: number;
+  skippedDueToInterval: number;
   source: string;
 }> {
   const startTime = new Date();
@@ -589,18 +595,74 @@ export async function syncAllTournamentDetails(): Promise<{
     });
     syncLogId = syncLog.id;
 
-    // Get all tournaments with their externalIds
+    const now = Date.now();
+    const ACTIVE_SYNC_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    const FINISHED_SYNC_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Get all tournaments with their externalIds and last sync times
     const tournaments = await prisma.tournament.findMany({
-      select: { id: true, externalId: true, name: true },
+      select: { 
+        id: true, 
+        externalId: true, 
+        name: true,
+        status: true,
+        lastSynced: true,
+      },
       orderBy: { startDate: "desc" },
     });
 
-    console.log(`[SYNC] Syncing details for ${tournaments.length} tournaments...`);
+    console.log(`[SYNC] Checking ${tournaments.length} tournaments for sync...`);
+
+    // Separate tournaments by sync urgency
+    const activeTournaments: typeof tournaments = [];
+    const recentlySyncedActive: typeof tournaments = [];
+    const recentlySyncedFinished: typeof tournaments = [];
+
+    for (const tournament of tournaments) {
+      if (tournament.status === "ACTIVE") {
+        // Active tournaments: check if 5+ minutes since last sync
+        const timeSinceSync = tournament.lastSynced 
+          ? now - tournament.lastSynced.getTime() 
+          : Infinity;
+        
+        if (timeSinceSync >= ACTIVE_SYNC_THRESHOLD) {
+          activeTournaments.push(tournament);
+        } else {
+          recentlySyncedActive.push(tournament);
+        }
+      } else if (tournament.status === "FINISHED") {
+        // Finished tournaments: check if 24+ hours since last sync
+        const timeSinceSync = tournament.lastSynced 
+          ? now - tournament.lastSynced.getTime() 
+          : Infinity;
+        
+        if (timeSinceSync >= FINISHED_SYNC_THRESHOLD) {
+          activeTournaments.push(tournament);
+        } else {
+          recentlySyncedFinished.push(tournament);
+        }
+      } else {
+        // UPCOMING tournaments: sync once per week
+        const timeSinceSync = tournament.lastSynced 
+          ? now - tournament.lastSynced.getTime() 
+          : Infinity;
+        const UPCOMING_SYNC_THRESHOLD = 7 * 24 * 60 * 60 * 1000;
+        
+        if (timeSinceSync >= UPCOMING_SYNC_THRESHOLD) {
+          activeTournaments.push(tournament);
+        }
+      }
+    }
+
+    console.log(`[SYNC] Need to sync: ${activeTournaments.length} active tournaments`);
+    console.log(`[SYNC] Recently synced: ${recentlySyncedActive.length} active, ${recentlySyncedFinished.length} finished`);
 
     let itemsSynced = 0;
     let failed = 0;
+    const skippedDueToInterval = recentlySyncedActive.length + recentlySyncedFinished.length;
 
-    for (const tournament of tournaments) {
+    // Sync active tournaments that need updating
+    for (const tournament of activeTournaments) {
       try {
         const result = await syncTournamentDetails(tournament.externalId);
         if (result.success) {
@@ -618,17 +680,20 @@ export async function syncAllTournamentDetails(): Promise<{
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    const finalStatus = failed === 0 ? "success" : failed < itemsSynced ? "partial" : failed === itemsSynced ? "failed" : "partial";
+    
     await prisma.syncLog.update({
       where: { id: syncLogId },
       data: {
-        status: failed === 0 ? "success" : failed < itemsSynced ? "partial" : "failed",
+        status: finalStatus,
         itemsSynced,
         skipped: failed,
         completedAt: new Date(),
+        syncedTournaments: itemsSynced,
       },
     });
 
-    return { success: failed === 0, itemsSynced, failed, source: "chess-results-details" };
+    return { success: failed === 0, itemsSynced, failed, skippedDueToInterval, source: "chess-results-details" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
 
@@ -639,7 +704,7 @@ export async function syncAllTournamentDetails(): Promise<{
       });
     }
 
-    return { success: false, itemsSynced: 0, failed: 0, source: "chess-results-details" };
+    return { success: false, itemsSynced: 0, failed: 0, skippedDueToInterval: 0, source: "chess-results-details" };
   }
 }
 

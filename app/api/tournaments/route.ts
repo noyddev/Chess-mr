@@ -2,13 +2,25 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { withRetry, getLastSyncTime } from "@/lib/database";
 import { successResponse, errorResponse } from "@/lib/api/response";
+import { checkRateLimit, getClientIP, getRateLimitHeaders } from "@/lib/rate-limit";
 import type { TournamentListItem, PaginatedResponse } from "@/lib/api/types";
 
 export async function GET(request: Request) {
+  const clientIP = getClientIP(request);
+  
+  // Rate limit: 60 requests per minute per IP
+  const rateLimit = checkRateLimit(clientIP, { windowMs: 60000, maxRequests: 60 });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      errorResponse("تم تجاوز الحد الأقصى للطلبات", null),
+      { status: 429, headers: getRateLimitHeaders(rateLimit) }
+    );
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
-    const limit = parseInt(searchParams.get("limit") || "20");
+    const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100);
     const status = searchParams.get("status");
     const sort = searchParams.get("sort") || "startDate";
 
@@ -65,13 +77,14 @@ export async function GET(request: Request) {
     };
 
     return NextResponse.json(
-      successResponse(response, lastSync)
+      successResponse(response, lastSync),
+      { headers: getRateLimitHeaders(rateLimit) }
     );
   } catch (error) {
     console.error("Tournaments fetch error:", error);
     return NextResponse.json(
       errorResponse("فشل في الاتصال بقاعدة البيانات", null),
-      { status: 503 }
+      { status: 503, headers: getRateLimitHeaders(rateLimit) }
     );
   }
 }

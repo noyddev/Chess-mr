@@ -13,9 +13,10 @@
   "cron": [
     {
       "name": "sync-tournaments",
-      "command": "curl -X POST https://chess-mr.up.railway.app/api/sync/cron",
+      "command": "curl -X POST https://chess-mr.up.railway.app/api/sync/cron -H 'Authorization: Bearer ${CRON_SECRET}'",
       "schedule": "*/5 * * * *",
-      "description": "Sync tournaments and players every 5 minutes for active tournament updates"
+      "description": "Sync tournaments and players every 5 minutes for active tournament updates",
+      "environmentVariables": ["CRON_SECRET"]
     }
   ]
 }

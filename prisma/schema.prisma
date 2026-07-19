@@ -106,6 +106,7 @@ model Pairing {
   id            String   @id @default(cuid())
   roundId       String
   board         Int?
+  isBye         Boolean @default(false)  // Explicit bye flag - player has no opponent
   whitePlayerId String?
   blackPlayerId String?
   result        String?
@@ -114,6 +115,8 @@ model Pairing {
   blackPlayer   Player? @relation("BlackPlayer", fields: [blackPlayerId], references: [id], onDelete: SetNull)
   round        Round   @relation(fields: [roundId], references: [id], onDelete: Cascade)
   
+  // Unique constraint: for bye pairings, board is -1; for regular pairings, board is unique per round
+  // This ensures we can upsert without conflicts for both regular and bye pairings
   @@unique([roundId, board])
   @@index([roundId])
   @@index([whitePlayerId])
