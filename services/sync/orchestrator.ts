@@ -186,10 +186,13 @@ export async function syncPlayers(): Promise<SyncResult> {
   const startTime = new Date();
   let syncLogId: string | null = null;
   try {
-    // Step 1: Sync all Mauritanian Lichess players
-    syncMauritanianLichessPlayers().catch(err => {
+    // Step 1: Sync all Mauritanian Lichess players - await this to ensure it completes
+    try {
+      await syncMauritanianLichessPlayers();
+    } catch (err) {
       console.error("[SYNC] Mauritania sync failed:", err);
-    });
+      // Continue with sync even if Mauritania sync fails - we still need to update existing players
+    }
 
     const syncLog = await prisma.syncLog.create({
       data: {
@@ -402,6 +405,23 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
           }
 
           // Create or update tournament player record
+          // Only update points/tiebreaks if we have valid scraped values to avoid overwriting with 0/null
+          const updateFields: Record<string, unknown> = {
+            seed: scrapedPlayer.seed,
+            rank: scrapedPlayer.rank,
+          };
+          
+          // Only include points if we got a valid value from scraper (not undefined or NaN)
+          if (scrapedPlayer.points !== undefined && !isNaN(scrapedPlayer.points)) {
+            updateFields.points = scrapedPlayer.points;
+          }
+          if (scrapedPlayer.tiebreak1 !== undefined && !isNaN(scrapedPlayer.tiebreak1)) {
+            updateFields.tiebreak1 = scrapedPlayer.tiebreak1;
+          }
+          if (scrapedPlayer.tiebreak2 !== undefined && !isNaN(scrapedPlayer.tiebreak2)) {
+            updateFields.tiebreak2 = scrapedPlayer.tiebreak2;
+          }
+          
           await prisma.tournamentPlayer.upsert({
             where: {
               tournamentId_playerId: {
@@ -409,13 +429,7 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
                 playerId: player.id,
               }
             },
-            update: {
-              seed: scrapedPlayer.seed,
-              points: scrapedPlayer.points ?? 0,
-              rank: scrapedPlayer.rank,
-              tiebreak1: scrapedPlayer.tiebreak1 ?? null,
-              tiebreak2: scrapedPlayer.tiebreak2 ?? null,
-            },
+            update: updateFields,
             create: {
               tournamentId: tournament.id,
               playerId: player.id,
@@ -456,7 +470,7 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
           }
         });
 
-        // Sync pairings for this round
+        // Sync pairings for this round - use upsert to update existing pairings
         for (const scrapedPairing of scrapedRound.pairings) {
           try {
             const whitePlayerId = scrapedPairing.whitePlayer 
@@ -466,9 +480,20 @@ export async function syncTournamentDetails(externalId: string): Promise<SyncRes
               ? playerNameToId.get(scrapedPairing.blackPlayer.toLowerCase())
               : null;
 
-            if (whitePlayerId || blackPlayerId) {
-              await prisma.pairing.create({
-                data: {
+            if (whitePlayerId || blackPlayerId || scrapedPairing.board) {
+              await prisma.pairing.upsert({
+                where: {
+                  roundId_board: {
+                    roundId: round.id,
+                    board: scrapedPairing.board,
+                  }
+                },
+                update: {
+                  whitePlayerId,
+                  blackPlayerId,
+                  result: scrapedPairing.result,
+                },
+                create: {
                   roundId: round.id,
                   board: scrapedPairing.board,
                   whitePlayerId,

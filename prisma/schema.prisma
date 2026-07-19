@@ -114,6 +114,7 @@ model Pairing {
   blackPlayer   Player? @relation("BlackPlayer", fields: [blackPlayerId], references: [id], onDelete: SetNull)
   round        Round   @relation(fields: [roundId], references: [id], onDelete: Cascade)
   
+  @@unique([roundId, board])
   @@index([roundId])
   @@index([whitePlayerId])
   @@index([blackPlayerId])
